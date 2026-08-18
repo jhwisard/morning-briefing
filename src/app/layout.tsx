@@ -54,7 +54,7 @@ export const metadata: Metadata = {
     description: "바쁜 아침, 세상 돌아가는 소식을 1분 만에! 국내외 주요 이슈와 뉴욕 증시 마켓 브리핑을 AI 음성으로 들어보세요.",
     images: [
       {
-        url: "/opengraph-image.png",
+        url: "/og-image.svg",
         width: 1200,
         height: 630,
         alt: "모닝 브리핑 대표 카드 썸네일",
@@ -65,7 +65,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "모닝 브리핑 - 오늘 아침 핵심 3줄 요약 & 오디오 뉴스",
     description: "출근길 1분 완독! 핵심 3줄 요약 & 오디오 음성 브리핑",
-    images: ["/opengraph-image.png"],
+    images: ["/og-image.svg"],
   },
 };
 
