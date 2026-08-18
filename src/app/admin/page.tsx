@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Newspaper, TrendingUp, Sparkles, Calendar, Lock, 
   CheckCircle2, AlertCircle, ArrowLeft, Send, RefreshCw, 
-  FileText, SunMedium, Eye, Wand2
+  FileText, SunMedium, Eye, Wand2, RotateCcw
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -49,7 +49,7 @@ export default function AdminPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 1. 비밀번호 확인
+  // 비밀번호 확인
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (passwordInput === ADMIN_SECRET) {
@@ -60,7 +60,25 @@ export default function AdminPage() {
     }
   };
 
-  // 2. 고성능 지능형 자동 파서 (날짜/제목/카테고리/날씨/하이라이트 정밀 추출)
+  // 폼 초기화 (Reset)
+  const handleReset = () => {
+    if (rawText && !confirm('입력한 내용과 파싱 결과를 모두 초기화하시겠습니까?')) {
+      return;
+    }
+    setRawText('');
+    setTitle('');
+    setWeather('');
+    setHighlightsText('');
+    setParsedSections([]);
+    setStatusMsg(null);
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    setBriefingDate(`${yyyy}-${mm}-${dd}`);
+  };
+
+  // 고성능 지능형 자동 파서 (주식 모닝 브리핑 & 간추린 뉴스 완벽 대응)
   const handleAutoParse = () => {
     if (!rawText.trim()) {
       alert('붙여넣을 브리핑 본문 텍스트를 입력해 주세요.');
@@ -68,10 +86,16 @@ export default function AdminPage() {
     }
 
     setIsParsing(true);
-    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+    setStatusMsg(null);
 
-    // [A] 카테고리 자동 감지 (주식 vs 뉴스)
-    let detectedType = categoryType;
+    // 탭(\t) 및 공백 정리
+    const lines = rawText
+      .split('\n')
+      .map(l => l.replace(/\t/g, ' ').trim())
+      .filter(Boolean);
+
+    // [A] 카테고리 자동 감지
+    let detectedType: 'news' | 'stock' = categoryType;
     if (rawText.includes('주식 모닝 브리핑') || rawText.includes('해외 증시') || rawText.includes('다우 지수') || rawText.includes('S&P 500')) {
       detectedType = 'stock';
       setCategoryType('stock');
@@ -80,15 +104,13 @@ export default function AdminPage() {
       setCategoryType('news');
     }
 
-    // [B] 날짜 및 요일 정밀 추출 ('26-8/18(화), 2026.8.18, 2026-08-18 등 모두 대응)
+    // [B] 날짜 및 요일 정밀 추출 ('26-8/15(토) 등)
     let parsedYear = '2026';
     let parsedMonth = '08';
-    let parsedDay = '18';
+    let parsedDay = '15';
     let parsedDayOfWeek = '';
 
-    // 날짜 정규식 패턴: '26-8/18 또는 2026-8-18 또는 2026.8.18
     const dateMatch = rawText.match(/(?:'|20)?(\d{2})[-/.년]\s*(\d{1,2})[-/.월]\s*(\d{1,2})/);
-    // 요일 정규식 패턴: (월), (화), (수), (목), (금), (토), (일)
     const dayMatch = rawText.match(/\(([월화수목금토일])\)/);
 
     if (dateMatch) {
@@ -98,28 +120,27 @@ export default function AdminPage() {
       parsedYear = y;
       parsedMonth = m;
       parsedDay = d;
-      const fullDateStr = `${y}-${m}-${d}`;
-      setBriefingDate(fullDateStr);
+      setBriefingDate(`${y}-${m}-${d}`);
     }
 
     if (dayMatch) {
       parsedDayOfWeek = `(${dayMatch[1]})`;
     }
 
-    // [C] 브리핑 표준 제목 자동 생성
+    // [C] 요구하신 브리핑 제목 생성
     const cleanTitle = detectedType === 'news'
-      ? `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 간추린 종합 뉴스`
-      : `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 주식 & 글로벌 마켓 모닝 브리핑`;
+      ? `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 간추린 뉴스`
+      : `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 주식 모닝 브리핑`;
     setTitle(cleanTitle);
 
-    // [D] 섹션 및 본문 파싱
+    // [D] 섹션 및 본문 정밀 파싱
     const sections: BriefingSection[] = [];
     let currentSec: BriefingSection | null = null;
     const extractedHighlights: string[] = [];
     let extractedWeather = '';
 
     if (detectedType === 'news') {
-      // 간추린 뉴스 파싱 ([미국], [한국.경제], [날씨] 등)
+      // 1. 간추린 뉴스 파서
       lines.forEach((line) => {
         if (line.startsWith('[') && line.includes(']')) {
           const catName = line.replace(/[\[\]]/g, '').trim();
@@ -137,13 +158,11 @@ export default function AdminPage() {
         } else if (line.startsWith('◐') || line.startsWith('⚬') || line.startsWith('-')) {
           let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').trim();
 
-          // [날씨] 섹션의 텍스트 처리
           if (line.includes('체감') || line.includes('기온') || line.includes('폭염') || line.includes('소나기') || line.includes('날씨')) {
             extractedWeather = cleanLine;
             return;
           }
 
-          // 출처 추출 (출처: ...)
           let source = '종합';
           const matchSource = cleanLine.match(/\((?:출처:\s*)?([^)]+)\)$/);
           if (matchSource) {
@@ -160,10 +179,20 @@ export default function AdminPage() {
         }
       });
     } else {
-      // 주식 모닝 브리핑 파싱 (1. 해외 증시 / 2. 오늘의 증시 키워드 / 3. 주요 주식 뉴스 / 4. 시황 요약)
-      lines.forEach((line) => {
-        // 섹션 제목 매칭 (1. 2. 3. 4. 로 시작하는 라인)
+      // 2. 주식 모닝 브리핑 전용 정밀 파서
+      let tempHeadline = '';
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // 대섹션 헤더 매칭 (1. 2. 3. 4.)
         if (/^[1-9]\.\s+/.test(line)) {
+          // 이전에 남은 headline 처리
+          if (tempHeadline && currentSec) {
+            currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
+            tempHeadline = '';
+          }
+
           const secTitle = line.trim();
           currentSec = {
             id: `sec_${sections.length + 1}`,
@@ -172,13 +201,46 @@ export default function AdminPage() {
             items: []
           };
           sections.push(currentSec);
-        } else if (line.startsWith('⚬') || line.startsWith('◐') || /^[1-9]\.\s*/.test(line) || line.startsWith('-')) {
-          let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').replace(/^[1-9]\.\s*/, '').trim();
+          continue;
+        }
 
-          // 첫 번째 해외증시 지수 라인인 경우 마켓 서브타이틀로 활용
-          if (sections.length === 1 && !extractedWeather && (line.includes('다우') || line.includes('S&P'))) {
-            extractedWeather = cleanLine;
+        if (!currentSec) continue;
+
+        // 3. 주요 주식 뉴스 섹션인 경우 (◐ 헤드라인과 ⚬ 상세내용 결합)
+        if (currentSec.category.includes('주요 주식 뉴스') || currentSec.category.includes('주요 뉴스')) {
+          if (line.startsWith('◐')) {
+            if (tempHeadline) {
+              currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
+            }
+            tempHeadline = line.replace(/^◐\s*/, '').trim();
+          } else if (line.startsWith('⚬') || line.startsWith('-')) {
+            let detail = line.replace(/^[⚬\-*]\s*/, '').trim();
+            let source = '증시 시황';
+            const matchSource = detail.match(/\((?:출처:\s*)?([^)]+)\)$/);
+            if (matchSource) {
+              source = matchSource[1].replace(/^출처:\s*/, '').trim();
+              detail = detail.replace(/\((?:출처:\s*)?([^)]+)\)$/, '').trim();
+            }
+
+            if (tempHeadline) {
+              currentSec.items.push({
+                text: `${tempHeadline} (${detail})`,
+                source
+              });
+              tempHeadline = '';
+            } else {
+              currentSec.items.push({ text: detail, source });
+            }
           }
+          continue;
+        }
+
+        // 1. 해외 증시, 2. 증시 키워드, 4. 시황 요약 처리
+        if (line.startsWith('⚬') || line.startsWith('◐') || /^[1-9]\.\s*/.test(line) || line.startsWith('-')) {
+          let cleanLine = line
+            .replace(/^[◐⚬\-*]\s*/, '')
+            .replace(/^[1-9]\.\s*/, '')
+            .trim();
 
           let source = '증시 시황';
           const matchSource = cleanLine.match(/\((?:출처:\s*)?([^)]+)\)$/);
@@ -187,15 +249,23 @@ export default function AdminPage() {
             cleanLine = cleanLine.replace(/\((?:출처:\s*)?([^)]+)\)$/, '').trim();
           }
 
-          if (currentSec) {
-            currentSec.items.push({ text: cleanLine, source });
-            // 2번 '증시 키워드' 섹션 항목들을 핵심 3줄 요약으로 추출
-            if (currentSec.category.includes('키워드') && extractedHighlights.length < 3) {
-              extractedHighlights.push(cleanLine);
-            }
+          currentSec.items.push({ text: cleanLine, source });
+
+          // 2. 오늘의 증시 키워드 -> 핵심 3줄 요약 추출
+          if (currentSec.category.includes('키워드')) {
+            extractedHighlights.push(cleanLine);
+          }
+
+          // 해외 증시 첫 줄 주요 지수 요약
+          if (currentSec.category.includes('해외 증시') && !extractedWeather && line.includes('다우')) {
+            extractedWeather = cleanLine;
           }
         }
-      });
+      }
+
+      if (tempHeadline && currentSec) {
+        currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
+      }
     }
 
     setParsedSections(sections);
@@ -207,18 +277,18 @@ export default function AdminPage() {
     setIsParsing(false);
     setStatusMsg({ 
       type: 'success', 
-      text: `✨ [${parsedYear}-${parsedMonth}-${parsedDay}] ${detectedType === 'news' ? '간추린 뉴스' : '주식 브리핑'} 파싱 성공! (섹션: ${sections.length}개)` 
+      text: `✨ [${parsedYear}-${parsedMonth}-${parsedDay}] ${detectedType === 'news' ? '간추린 뉴스' : '주식 모닝 브리핑'} 파싱 성공! (총 ${sections.length}개 섹션)` 
     });
   };
 
-  // 3. Supabase DB에 최종 발행 (Upsert)
+  // Supabase DB에 최종 발행
   const handlePublish = async () => {
     if (!briefingDate || !title) {
       alert('날짜와 제목을 입력해 주세요.');
       return;
     }
     if (parsedSections.length === 0) {
-      alert('파싱된 섹션 데이터가 없습니다. 먼저 [자동 파싱 실행]을 눌러주세요.');
+      alert('파싱된 데이터가 없습니다. 먼저 [자동 파싱 실행]을 눌러주세요.');
       return;
     }
 
@@ -231,7 +301,6 @@ export default function AdminPage() {
       .filter(Boolean);
 
     try {
-      // 기존 날짜 + 카테고리 데이터 삭제 후 새로 등록
       await supabase
         .from('briefings')
         .delete()
@@ -253,8 +322,9 @@ export default function AdminPage() {
 
       setStatusMsg({ 
         type: 'success', 
-        text: `🎉 [${briefingDate}] ${categoryType === 'news' ? '간추린 뉴스' : '주식 브리핑'} 발행이 성공적으로 완료되었습니다!` 
+        text: `🎉 [${briefingDate}] ${categoryType === 'news' ? '간추린 뉴스' : '주식 모닝 브리핑'} 발행이 성공적으로 완료되었습니다!` 
       });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       console.error(err);
       setStatusMsg({ type: 'error', text: `발행 실패: ${err.message || '데이터베이스 오류'}` });
@@ -308,8 +378,9 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20 antialiased">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
+      
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-md">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <Link href="/" className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition">
@@ -330,145 +401,179 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 pt-6 space-y-6">
+      <main className="max-w-4xl mx-auto px-4 pt-5 space-y-5">
         
-        {/* Status Toast */}
-        {statusMsg && (
-          <div className={`p-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-lg ${
-            statusMsg.type === 'success' ? 'bg-emerald-950/90 border border-emerald-500/50 text-emerald-300' : 'bg-rose-950/90 border border-rose-500/50 text-rose-300'
-          }`}>
-            {statusMsg.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" /> : <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
-            <span>{statusMsg.text}</span>
-          </div>
-        )}
-
-        {/* Input Form */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5">
-          
-          {/* Step 1: Text Paste Area */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
-                <FileText className="w-4 h-4" />
-                1. 원본 텍스트 붙여넣기 (뉴스 or 주식 브리핑)
-              </label>
+        {/* 🔥 최상단 제어 바 (초기화 / 자동파싱 / 즉시발행하기) */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 border border-slate-700 transition"
+                title="입력 내용 전체 비우기"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                초기화
+              </button>
               <button
                 type="button"
                 onClick={handleAutoParse}
                 disabled={isParsing}
-                className="px-4 py-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-sky-500/20 transition"
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 transition"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isParsing ? 'animate-spin' : ''}`} />
                 자동 파싱 실행
               </button>
             </div>
-            <textarea
-              rows={10}
-              value={rawText}
-              onChange={(e) => setRawText(e.target.value)}
-              placeholder={`여기에 뉴스나 주식 브리핑 텍스트를 그대로 복사해서 붙여넣고 [자동 파싱 실행]을 누르세요.\n\n(예시)\n간추린 뉴스 - '26-8/18(화) 간추린 뉴스\n[美미국]\n◐ 트럼프 행정부, 한미 훈련 축소 검토. (출처: 워싱턴포스트)\n\n(또는 주식)\n📈 주식 모닝 브리핑 - '26-8/18(화)\n1. 해외 증시 마감 현황\n⚬ 다우 지수: 53,810.15 (+0.14%)`}
-              className="w-full p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 leading-relaxed"
-            />
+
+            {/* 메인 발행하기 버튼 */}
+            <button
+              type="button"
+              onClick={handlePublish}
+              disabled={isSaving || parsedSections.length === 0}
+              className="flex-1 sm:flex-initial px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4" />
+              <span>{isSaving ? '데이터베이스 저장 중...' : '🚀 이 내용으로 즉시 발행하기'}</span>
+            </button>
           </div>
 
-          <div className="border-t border-slate-800 pt-5 space-y-4">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              2. 자동 감지 및 파싱된 메타 정보 (수정 가능)
-            </h2>
+          {/* 🔥 상태 안내 문구 (성공 / 실패 알림 배너) */}
+          {statusMsg && (
+            <div className={`p-3.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-md animate-fade-in ${
+              statusMsg.type === 'success' 
+                ? 'bg-emerald-950/90 border border-emerald-500/60 text-emerald-300' 
+                : 'bg-rose-950/90 border border-rose-500/60 text-rose-300'
+            }`}>
+              {statusMsg.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              )}
+              <span className="leading-snug">{statusMsg.text}</span>
+            </div>
+          )}
+        </section>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Category Select */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">카테고리</label>
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryType('news')}
-                    className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
-                      categoryType === 'news' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Newspaper className="w-4 h-4" /> 간추린 뉴스
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryType('stock')}
-                    className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
-                      categoryType === 'stock' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <TrendingUp className="w-4 h-4" /> 주식 모닝 브리핑
-                  </button>
-                </div>
-              </div>
+        {/* 1. 텍스트 입력 영역 */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+              <FileText className="w-4 h-4" />
+              1. 원본 텍스트 붙여넣기 (뉴스 or 주식 브리핑)
+            </label>
+            <span className="text-[11px] text-slate-500">
+              붙여넣고 상단 [자동 파싱 실행] 클릭
+            </span>
+          </div>
+          <textarea
+            rows={10}
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            placeholder={`여기에 아침 뉴스 또는 주식 브리핑 텍스트를 그대로 복사해서 붙여넣으세요.\n\n[간추린 뉴스 예시]\n간추린 뉴스 - '26-8/15(토)\n[美미국]\n◐ 트럼프 대통령, 한미 연합훈련 축소 지시... (출처: 경향신문)\n\n[주식 브리핑 예시]\n주식 모닝 브리핑 - '26-8/15(토)\n1. 해외 증시 마감 현황\n⚬ 다우 지수: 53,732.41 (-0.20%)`}
+            className="w-full p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 leading-relaxed"
+          />
+        </section>
 
-              {/* Date Picker */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-1.5">발행 날짜</label>
-                <div className="relative">
-                  <Calendar className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="date"
-                    value={briefingDate}
-                    onChange={(e) => setBriefingDate(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
-                  />
-                </div>
+        {/* 2. 파싱 메타데이터 검토 및 수정 영역 */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            2. 자동 파싱된 메타 정보 (수정 가능)
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Category Select */}
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">카테고리</label>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setCategoryType('news')}
+                  className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
+                    categoryType === 'news' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Newspaper className="w-4 h-4" /> 간추린 뉴스
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryType('stock')}
+                  className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
+                    categoryType === 'stock' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4" /> 주식 모닝 브리핑
+                </button>
               </div>
             </div>
 
-            {/* Title Input */}
+            {/* Date Picker */}
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1.5">브리핑 제목</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="예: 2026년 8월 18일(화) 간추린 종합 뉴스"
-                className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700"
-              />
-            </div>
-
-            {/* Weather / Subtitle */}
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1.5">날씨 또는 마켓 한줄 요약</label>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5">발행 날짜</label>
               <div className="relative">
-                <SunMedium className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400" />
+                <Calendar className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
-                  type="text"
-                  value={weather}
-                  onChange={(e) => setWeather(e.target.value)}
-                  placeholder="예: 전국 대부분 체감 33~35°C 폭염특보 지속 ☀️"
-                  className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700"
+                  type="date"
+                  value={briefingDate}
+                  onChange={(e) => setBriefingDate(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono"
                 />
               </div>
             </div>
+          </div>
 
-            {/* Highlights 3 Lines */}
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1.5">
-                핵심 3줄 요약 (엔터로 줄바꿈)
-              </label>
-              <textarea
-                rows={3}
-                value={highlightsText}
-                onChange={(e) => setHighlightsText(e.target.value)}
-                placeholder="1. 첫 번째 핵심 키워드&#10;2. 두 번째 핵심 키워드&#10;3. 세 번째 핵심 키워드"
-                className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 leading-relaxed"
+          {/* Title Input */}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5">브리핑 제목</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="예: 2026년 8월 15일(토) 간추린 뉴스"
+              className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 font-medium"
+            />
+          </div>
+
+          {/* Weather / Subtitle */}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5">날씨 또는 마켓 한줄 요약</label>
+            <div className="relative">
+              <SunMedium className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400" />
+              <input
+                type="text"
+                value={weather}
+                onChange={(e) => setWeather(e.target.value)}
+                placeholder="예: 전국 대부분 체감 33~35°C 폭염특보 지속 ☀️"
+                className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700"
               />
             </div>
           </div>
-        </div>
 
-        {/* Parsed Preview & Final Publish Button */}
+          {/* Highlights 3 Lines */}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5">
+              핵심 요약 (엔터로 줄바꿈)
+            </label>
+            <textarea
+              rows={4}
+              value={highlightsText}
+              onChange={(e) => setHighlightsText(e.target.value)}
+              placeholder="1. 첫 번째 핵심 키워드&#10;2. 두 번째 핵심 키워드&#10;3. 세 번째 핵심 키워드"
+              className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 leading-relaxed"
+            />
+          </div>
+        </section>
+
+        {/* 3. 파싱 결과 미리보기 */}
         {parsedSections.length > 0 && (
-          <div className="space-y-4">
+          <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                3. 파싱 결과 미리보기 ({parsedSections.length}개 섹션)
+                3. 파싱된 섹션 미리보기 ({parsedSections.length}개 섹션)
               </h2>
-              <span className="text-xs text-emerald-400 font-mono">준비 완료</span>
+              <span className="text-xs text-emerald-400 font-mono">발행 대기 중</span>
             </div>
 
             <div className="space-y-3">
@@ -490,20 +595,7 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-
-            {/* Publish Button */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handlePublish}
-                disabled={isSaving}
-                className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-base rounded-2xl shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition disabled:opacity-50"
-              >
-                <Send className="w-5 h-5" />
-                <span>{isSaving ? '데이터베이스 저장 중...' : '이 내용으로 즉시 발행하기'}</span>
-              </button>
-            </div>
-          </div>
+          </section>
         )}
       </main>
     </div>
