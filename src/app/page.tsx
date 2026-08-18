@@ -33,7 +33,6 @@ export interface Briefing {
 }
 
 export default function BriefingPage() {
-  // 메인 대분류 탭 ('news': 간추린 뉴스, 'stock': 주식 모닝 브리핑)
   const [mainTab, setMainTab] = useState<'news' | 'stock'>('news');
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -46,7 +45,6 @@ export default function BriefingPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<'stopped' | 'highlights' | 'all' | 'section'>('stopped');
 
-  // 메인 탭(뉴스/주식) 변경 시 해당 카테고리의 날짜 목록 조회
   useEffect(() => {
     async function loadDatesForTab() {
       setLoading(true);
@@ -75,7 +73,6 @@ export default function BriefingPage() {
     loadDatesForTab();
   }, [mainTab]);
 
-  // 특정 탭 + 특정 날짜의 브리핑 로드
   async function fetchBriefing(tab: 'news' | 'stock', dateStr: string) {
     setLoading(true);
     stopTTS();
@@ -97,14 +94,12 @@ export default function BriefingPage() {
     setLoading(false);
   }
 
-  // 날짜 전환
   const handleDateChange = (newDate: string) => {
     if (newDate === selectedDate || !newDate) return;
     setSelectedDate(newDate);
     fetchBriefing(mainTab, newDate);
   };
 
-  // 날짜 라벨 포맷 (예: 2026-08-18 -> 8/18(화))
   const formatDateLabel = (dateStr: string) => {
     try {
       const parts = dateStr.split('-');
@@ -248,11 +243,15 @@ export default function BriefingPage() {
                   setIsLargeFont(!isLargeFont);
                   showToast(isLargeFont ? '기본 글씨 모드' : '큰 글씨 모드');
                 }}
-                className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition text-xs font-bold flex items-center"
+                className={`p-2 rounded-lg transition text-xs font-bold flex items-center ${
+                  isLargeFont 
+                    ? 'bg-sky-600 text-white dark:bg-sky-500' 
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
                 title="글씨 크기 조절"
               >
                 <span className="text-sm">가</span>
-                <span className="text-[10px] text-slate-400">±</span>
+                <span className="text-[10px] opacity-80">±</span>
               </button>
               <button
                 onClick={copyBriefing}
@@ -271,7 +270,7 @@ export default function BriefingPage() {
             </div>
           </div>
 
-          {/* Main 2-Segment Tab Switcher (간추린 뉴스 / 주식 모닝 브리핑) */}
+          {/* Main 2-Segment Tab Switcher */}
           <div className="max-w-2xl mx-auto px-4 pb-2.5">
             <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/60">
               <button
@@ -461,7 +460,7 @@ export default function BriefingPage() {
                 </div>
               </section>
 
-              {/* Highlights 3 lines */}
+              {/* Highlights 3 lines (글자 크기 모드 적용 완료) */}
               {briefing.highlights && briefing.highlights.length > 0 && (
                 <section className={`border rounded-2xl p-4 shadow-sm space-y-2.5 ${
                   mainTab === 'stock'
@@ -477,7 +476,9 @@ export default function BriefingPage() {
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">{briefing.briefing_date}</span>
                   </div>
-                  <ul className="text-xs sm:text-sm leading-relaxed text-slate-700 dark:text-slate-200 space-y-1.5 list-disc list-inside">
+                  <ul className={`leading-relaxed text-slate-700 dark:text-slate-200 space-y-1.5 list-disc list-inside ${
+                    isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
+                  }`}>
                     {briefing.highlights.map((h: string, i: number) => (
                       <li key={i}>{h}</li>
                     ))}
@@ -485,7 +486,7 @@ export default function BriefingPage() {
                 </section>
               )}
 
-              {/* News / Stock Sections List */}
+              {/* News / Stock Sections List (글자 크기 모드 연동) */}
               <div className="space-y-3.5">
                 {filteredSections.map((sec: BriefingSection) => (
                   <section
@@ -517,7 +518,9 @@ export default function BriefingPage() {
                             mainTab === 'stock' ? 'text-emerald-500' : 'text-sky-500'
                           }`}>◐</span>
                           <div className="flex-1 space-y-1">
-                            <p className={`text-slate-800 dark:text-slate-200 leading-snug ${isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'}`}>
+                            <p className={`text-slate-800 dark:text-slate-200 leading-snug ${
+                              isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
+                            }`}>
                               {item.text}
                             </p>
                             <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
