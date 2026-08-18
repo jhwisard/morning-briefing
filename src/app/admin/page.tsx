@@ -30,7 +30,7 @@ export default function AdminPage() {
   const [authError, setAuthError] = useState(false);
 
   // 폼 입력 상태
-  const [categoryType, setCategoryType] = useState<'news' | 'stock'>('news');
+  const [categoryType, setCategoryType] = useState<'news' | 'stock'>('stock');
   const [briefingDate, setBriefingDate] = useState(() => {
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -78,7 +78,7 @@ export default function AdminPage() {
     setBriefingDate(`${yyyy}-${mm}-${dd}`);
   };
 
-  // 고성능 지능형 자동 파서 (주식 모닝 브리핑 & 간추린 뉴스 완벽 대응)
+  // 고성능 지능형 자동 파서
   const handleAutoParse = () => {
     if (!rawText.trim()) {
       alert('붙여넣을 브리핑 본문 텍스트를 입력해 주세요.');
@@ -88,18 +88,25 @@ export default function AdminPage() {
     setIsParsing(true);
     setStatusMsg(null);
 
-    // 탭(\t) 및 공백 정리
-    const lines = rawText
+    // [전처리] 탭 제거 및 줄바꿈 없이 뭉쳐있는 ◐, ⚬ 기호 앞 강제 개행
+    let normalizedText = rawText
+      .replace(/\t/g, ' ')
+      .replace(/([^\n])◐/g, '$1\n◐')
+      .replace(/([^\n])⚬/g, '$1\n⚬')
+      .replace(/([^\n])(\[美|\[中|\[러|\[英|\[日|\[한국|\[스포츠|\[날씨)/g, '$1\n$2')
+      .replace(/([^\n])(1\.\s*해외|2\.\s*(?:오늘의\s*)?증시\s*키워드|3\.\s*주요|4\.\s*(?:오늘의\s*)?시황)/g, '$1\n$2');
+
+    const lines = normalizedText
       .split('\n')
-      .map(l => l.replace(/\t/g, ' ').trim())
+      .map(l => l.trim())
       .filter(Boolean);
 
-    // [A] 카테고리 자동 감지
+    // [A] 카테고리 자동 감지 (주식 vs 간추린 뉴스)
     let detectedType: 'news' | 'stock' = categoryType;
-    if (rawText.includes('주식 모닝 브리핑') || rawText.includes('해외 증시') || rawText.includes('다우 지수') || rawText.includes('S&P 500')) {
+    if (normalizedText.includes('주식 모닝 브리핑') || normalizedText.includes('해외 증시') || normalizedText.includes('다우 지수') || normalizedText.includes('S&P 500')) {
       detectedType = 'stock';
       setCategoryType('stock');
-    } else if (rawText.includes('[美미국]') || rawText.includes('간추린 뉴스')) {
+    } else if (normalizedText.includes('[美미국]') || normalizedText.includes('간추린 뉴스')) {
       detectedType = 'news';
       setCategoryType('news');
     }
@@ -110,8 +117,8 @@ export default function AdminPage() {
     let parsedDay = '15';
     let parsedDayOfWeek = '';
 
-    const dateMatch = rawText.match(/(?:'|20)?(\d{2})[-/.년]\s*(\d{1,2})[-/.월]\s*(\d{1,2})/);
-    const dayMatch = rawText.match(/\(([월화수목금토일])\)/);
+    const dateMatch = normalizedText.match(/(?:'|20)?(\d{2})[-/.년]\s*(\d{1,2})[-/.월]\s*(\d{1,2})/);
+    const dayMatch = normalizedText.match(/\(([월화수목금토일])\)/);
 
     if (dateMatch) {
       const y = dateMatch[1].length === 2 ? `20${dateMatch[1]}` : dateMatch[1];
@@ -127,20 +134,21 @@ export default function AdminPage() {
       parsedDayOfWeek = `(${dayMatch[1]})`;
     }
 
-    // [C] 요구하신 브리핑 제목 생성
+    // [C] 브리핑 표준 제목 생성
     const cleanTitle = detectedType === 'news'
       ? `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 간추린 뉴스`
       : `${parsedYear}년 ${parseInt(parsedMonth)}월 ${parseInt(parsedDay)}일${parsedDayOfWeek} 주식 모닝 브리핑`;
     setTitle(cleanTitle);
 
-    // [D] 섹션 및 본문 정밀 파싱
+    // [D] 섹션 및 본문 파싱
     const sections: BriefingSection[] = [];
     let currentSec: BriefingSection | null = null;
     const extractedHighlights: string[] = [];
     let extractedWeather = '';
+    let dowVal = '', spVal = '', nasVal = '';
 
     if (detectedType === 'news') {
-      // 1. 간추린 뉴스 파서
+      // 1. 간추린 뉴스 파싱
       lines.forEach((line) => {
         if (line.startsWith('[') && line.includes(']')) {
           const catName = line.replace(/[\[\]]/g, '').trim();
@@ -185,18 +193,18 @@ export default function AdminPage() {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
-        // 대섹션 헤더 매칭 (1. 2. 3. 4.)
-        if (/^[1-9]\.\s+/.test(line)) {
-          // 이전에 남은 headline 처리
+        // 대섹션 헤더 정확한 매칭 (1. 해외 증시, 2. 오늘의 증시 키워드, 3. 주요 주식 뉴스, 4. 오늘의 시황 요약)
+        const topMatch = line.match(/^(1\.\s*해외\s*증시[^\n]*|2\.\s*(?:오늘의\s*)?증시\s*키워드[^\n]*|3\.\s*주요\s*(?:주식\s*)?뉴스[^\n]*|4\.\s*(?:오늘의\s*)?시황\s*(?:요약)?[^\n]*)/);
+
+        if (topMatch) {
           if (tempHeadline && currentSec) {
             currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
             tempHeadline = '';
           }
 
-          const secTitle = line.trim();
           currentSec = {
             id: `sec_${sections.length + 1}`,
-            category: secTitle,
+            category: topMatch[1].trim(),
             icon: 'TrendingUp',
             items: []
           };
@@ -206,8 +214,8 @@ export default function AdminPage() {
 
         if (!currentSec) continue;
 
-        // 3. 주요 주식 뉴스 섹션인 경우 (◐ 헤드라인과 ⚬ 상세내용 결합)
-        if (currentSec.category.includes('주요 주식 뉴스') || currentSec.category.includes('주요 뉴스')) {
+        // [3. 주요 주식 뉴스] 섹션: ◐ 헤드라인과 ⚬ 상세설명 결합
+        if (currentSec.category.includes('주요') || currentSec.category.includes('뉴스')) {
           if (line.startsWith('◐')) {
             if (tempHeadline) {
               currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
@@ -235,36 +243,51 @@ export default function AdminPage() {
           continue;
         }
 
-        // 1. 해외 증시, 2. 증시 키워드, 4. 시황 요약 처리
-        if (line.startsWith('⚬') || line.startsWith('◐') || /^[1-9]\.\s*/.test(line) || line.startsWith('-')) {
-          let cleanLine = line
-            .replace(/^[◐⚬\-*]\s*/, '')
-            .replace(/^[1-9]\.\s*/, '')
-            .trim();
-
-          let source = '증시 시황';
-          const matchSource = cleanLine.match(/\((?:출처:\s*)?([^)]+)\)$/);
-          if (matchSource) {
-            source = matchSource[1].replace(/^출처:\s*/, '').trim();
-            cleanLine = cleanLine.replace(/\((?:출처:\s*)?([^)]+)\)$/, '').trim();
-          }
+        // [1. 해외증시] 항목 처리
+        if (currentSec.category.includes('해외 증시')) {
+          let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').trim();
+          let source = '뉴욕증시';
+          if (cleanLine.includes('다우')) { source = '다우'; dowVal = cleanLine; }
+          else if (cleanLine.includes('S&P')) { source = 'S&P500'; spVal = cleanLine; }
+          else if (cleanLine.includes('나스닥')) { source = '나스닥'; nasVal = cleanLine; }
+          else if (cleanLine.includes('반도체')) { source = '반도체'; }
+          else if (cleanLine.includes('러셀')) { source = '소형주'; }
+          else if (cleanLine.includes('MSCI') || cleanLine.includes('야간')) { source = '한국물'; }
 
           currentSec.items.push({ text: cleanLine, source });
+          continue;
+        }
 
-          // 2. 오늘의 증시 키워드 -> 핵심 3줄 요약 추출
-          if (currentSec.category.includes('키워드')) {
-            extractedHighlights.push(cleanLine);
-          }
+        // [2. 오늘의 증시 키워드] 항목 처리
+        if (currentSec.category.includes('키워드')) {
+          let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').replace(/^\d+\.\s*/, '').trim();
+          currentSec.items.push({ text: cleanLine, source: '핵심 키워드' });
+          extractedHighlights.push(cleanLine);
+          continue;
+        }
 
-          // 해외 증시 첫 줄 주요 지수 요약
-          if (currentSec.category.includes('해외 증시') && !extractedWeather && line.includes('다우')) {
-            extractedWeather = cleanLine;
-          }
+        // [4. 오늘의 시황 요약] 항목 처리
+        if (currentSec.category.includes('시황')) {
+          let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').replace(/^\d+\.\s*/, '').trim();
+          currentSec.items.push({ text: cleanLine, source: '시황 분석' });
+          continue;
         }
       }
 
       if (tempHeadline && currentSec) {
         currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
+      }
+
+      // 3대 지수 기반 한 줄 요약 자동 조합
+      if (dowVal || spVal || nasVal) {
+        const dMatch = dowVal.match(/\(([+-]?\d+\.?\d*%)\)/);
+        const sMatch = spVal.match(/\(([+-]?\d+\.?\d*%)\)/);
+        const nMatch = nasVal.match(/\(([+-]?\d+\.?\d*%)\)/);
+        const dRate = dMatch ? `다우 ${dMatch[1]}` : '';
+        const sRate = sMatch ? `S&P500 ${sMatch[1]}` : '';
+        const nRate = nMatch ? `나스닥 ${nMatch[1]}` : '';
+        const rates = [dRate, sRate, nRate].filter(Boolean).join(' · ');
+        extractedWeather = `${rates} (소비 지표 둔화 속 숨고르기)`;
       }
     }
 
@@ -403,7 +426,7 @@ export default function AdminPage() {
 
       <main className="max-w-4xl mx-auto px-4 pt-5 space-y-5">
         
-        {/* 🔥 최상단 제어 바 (초기화 / 자동파싱 / 즉시발행하기) */}
+        {/* 상단 통합 제어 바 (초기화 / 자동파싱 / 즉시발행하기 / 상태알림) */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex items-center gap-2">
@@ -427,7 +450,6 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* 메인 발행하기 버튼 */}
             <button
               type="button"
               onClick={handlePublish}
@@ -439,7 +461,7 @@ export default function AdminPage() {
             </button>
           </div>
 
-          {/* 🔥 상태 안내 문구 (성공 / 실패 알림 배너) */}
+          {/* 발행 상태 알림 배너 */}
           {statusMsg && (
             <div className={`p-3.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-md animate-fade-in ${
               statusMsg.type === 'success' 
@@ -471,7 +493,7 @@ export default function AdminPage() {
             rows={10}
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
-            placeholder={`여기에 아침 뉴스 또는 주식 브리핑 텍스트를 그대로 복사해서 붙여넣으세요.\n\n[간추린 뉴스 예시]\n간추린 뉴스 - '26-8/15(토)\n[美미국]\n◐ 트럼프 대통령, 한미 연합훈련 축소 지시... (출처: 경향신문)\n\n[주식 브리핑 예시]\n주식 모닝 브리핑 - '26-8/15(토)\n1. 해외 증시 마감 현황\n⚬ 다우 지수: 53,732.41 (-0.20%)`}
+            placeholder={`여기에 아침 뉴스 또는 주식 브리핑 텍스트를 그대로 복사해서 붙여넣으세요.`}
             className="w-full p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 leading-relaxed"
           />
         </section>
@@ -483,7 +505,6 @@ export default function AdminPage() {
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Category Select */}
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1.5">카테고리</label>
               <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
@@ -508,7 +529,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Date Picker */}
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1.5">발행 날짜</label>
               <div className="relative">
@@ -523,37 +543,34 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Title Input */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1.5">브리핑 제목</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="예: 2026년 8월 15일(토) 간추린 뉴스"
+              placeholder="예: 2026년 8월 15일(토) 주식 모닝 브리핑"
               className="w-full px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700 font-medium"
             />
           </div>
 
-          {/* Weather / Subtitle */}
           <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1.5">날씨 또는 마켓 한줄 요약</label>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5">마켓 한 줄 요약 / 날씨</label>
             <div className="relative">
               <SunMedium className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400" />
               <input
                 type="text"
                 value={weather}
                 onChange={(e) => setWeather(e.target.value)}
-                placeholder="예: 전국 대부분 체감 33~35°C 폭염특보 지속 ☀️"
+                placeholder="예: 다우 -0.20% · S&P500 -0.17% · 나스닥 -0.28% (소비 지표 둔화 속 숨고르기)"
                 className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 placeholder-slate-700"
               />
             </div>
           </div>
 
-          {/* Highlights 3 Lines */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1.5">
-              핵심 요약 (엔터로 줄바꿈)
+              핵심 3~4줄 요약 (엔터로 줄바꿈)
             </label>
             <textarea
               rows={4}
