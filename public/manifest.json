@@ -1,0 +1,29 @@
+{
+  "name": "모닝 브리핑 - Morning Briefing",
+  "short_name": "모닝브리핑",
+  "description": "바쁜 아침 1분! 간추린 핵심 뉴스 & 주식 시황 오디오 브리핑",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090919",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
