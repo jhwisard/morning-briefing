@@ -15,7 +15,7 @@ on:
           - all
           - stock
           - news
-
+ 
 jobs:
   publish-briefings:
     runs-on: ubuntu-latest
