@@ -279,17 +279,43 @@ export default function AdminPage() {
           continue;
         }
 
-        // [4. 오늘의 시황 요약] 항목 처리
+        // [4. 오늘의 시황 요약] 항목 처리 (◐ 헤드라인과 : 상세설명 한 줄 결합)
         if (currentSec.category.includes('시황')) {
-          let cleanLine = line.replace(/^[◐⚬\-*]\s*/, '').replace(/^\d+\.\s*/, '').trim();
-          currentSec.items.push({ text: cleanLine, source: '시황 분석' });
-          continue;
+            if (line.startsWith('◐')) {
+                if (tempHeadline) {
+                currentSec.items.push({ text: tempHeadline, source: '시황 분석' });
+                }
+                tempHeadline = line.replace(/^◐\s*/, '').trim();
+            } else {
+                let detail = line.replace(/^[:\s⚬\-*○▶▷·ㆍ]+\s*/, '').trim();
+                if (!detail) continue;
+
+                let source = '시황 분석';
+                const matchSource = detail.match(/\((?:출처:\s*)?([^)]+)\)$/);
+                if (matchSource) {
+                source = matchSource[1].replace(/^출처:\s*/, '').trim();
+                detail = detail.replace(/\((?:출처:\s*)?([^)]+)\)$/, '').trim();
+                }
+
+                if (tempHeadline) {
+                currentSec.items.push({
+                    text: `${tempHeadline}: ${detail}`,
+                    source
+                });
+                tempHeadline = '';
+                } else {
+                currentSec.items.push({ text: detail, source });
+                }
+            }
+            continue;
         }
       }
 
       if (tempHeadline && currentSec) {
-        currentSec.items.push({ text: tempHeadline, source: '증시 뉴스' });
-      }
+        const defaultSource = currentSec.category.includes('시황') ? '시황 분석' : '증시 뉴스';
+        currentSec.items.push({ text: tempHeadline, source: defaultSource });
+        tempHeadline = '';
+    }
 
       // 3대 지수 기반 한 줄 요약 동적 조합 (하드코딩 제거)
       if (dowVal || spVal || nasVal) {
