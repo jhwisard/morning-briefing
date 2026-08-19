@@ -22,7 +22,11 @@ if (!GEMINI_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+  realtime: { createClient: false }
+});
+
 
 // 2. KST (한국 표준시) 기준 날짜 계산
 function getKSTDateInfo() {

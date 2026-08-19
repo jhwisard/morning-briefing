@@ -24,10 +24,10 @@ jobs:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
 
-      - name: Node.js 20 설정
+      - name: Node.js 22 설정
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # 기존 20에서 22로 변경
           cache: 'npm'
 
       - name: 종속성 패키지 설치
