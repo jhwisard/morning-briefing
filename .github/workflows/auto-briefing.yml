@@ -1,0 +1,41 @@
+name: Daily Auto Morning Briefing
+
+on:
+  schedule:
+    # UTC 21:30 = KST 06:30 (월~금 아침 개장 전 자동 실행)
+    - cron: '30 21 * * 0-4'
+  workflow_dispatch:
+    inputs:
+      category:
+        description: '발행할 브리핑 종류 선택'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - stock
+          - news
+
+jobs:
+  publish-briefings:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 20 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 종속성 패키지 설치
+        run: npm ci
+
+      - name: Gemini 브리핑 자동 발행 실행
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/gemini-auto-publish.js ${{ github.event.inputs.category || 'all' }}
