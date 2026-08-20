@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react'; // 💡 useRef 추가
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Newspaper, TrendingUp, Sun, Moon, Search, X, Volume2, 
@@ -44,10 +44,11 @@ export default function BriefingPage() {
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<'stopped' | 'highlights' | 'all' | 'section'>('stopped');
-  // 💡 날짜 스크롤 컨테이너 참조 Ref 추가
+
+  // 날짜 가로 스크롤 컨테이너 Ref
   const dateScrollRef = useRef<HTMLDivElement>(null);
 
-  // 💡 여기에 추가
+  // 날짜 로드 또는 변경 시 선택된 날짜 버튼으로 자동 가로 스크롤
   useEffect(() => {
     if (dateScrollRef.current) {
       const selectedBtn = dateScrollRef.current.querySelector<HTMLElement>('[data-selected="true"]');
@@ -62,12 +63,11 @@ export default function BriefingPage() {
       setLoading(true);
       stopTTS();
       
-      // 55번째 줄 부근
       const { data: dateRows, error: dateError } = await supabase
         .from('briefings')
         .select('briefing_date')
         .eq('category_type', mainTab)
-        .order('briefing_date', { ascending: true }); // 💡 false -> true 로 변경
+        .order('briefing_date', { ascending: true }); // 과거 -> 최신순 정렬
 
       if (dateError || !dateRows || dateRows.length === 0) {
         setAvailableDates([]);
@@ -79,11 +79,10 @@ export default function BriefingPage() {
       const uniqueDates = Array.from(new Set(dateRows.map(r => r.briefing_date)));
       setAvailableDates(uniqueDates);
 
-      // 💡 맨 뒤(우측) 항목이 가장 최신 날짜
+      // 맨 오른쪽 항목(가장 최신 날짜) 기본 선택
       const latestDate = uniqueDates[uniqueDates.length - 1];
       setSelectedDate(latestDate);
       await fetchBriefing(mainTab, latestDate);
-
     }
     loadDatesForTab();
   }, [mainTab]);
@@ -222,9 +221,8 @@ export default function BriefingPage() {
     <div className={isDark ? 'dark' : ''}>
       <div className="bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen transition-colors duration-200 antialiased font-sans pb-16">
         
-        {/* Sticky Header */}
+        {/* Sticky Header (아이폰 Safe Area 패딩 및 마스킹 적용) */}
         <header className="sticky top-0 z-50 transform-gpu bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm pt-[env(safe-area-inset-top,0px)] transition-colors">
-        {/* <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm"> */}
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-md ${
@@ -326,10 +324,10 @@ export default function BriefingPage() {
         </header>
 
         <main className="max-w-2xl mx-auto px-4 pt-4 space-y-4">
+          
           {/* Date Navigator */}
           {availableDates.length > 0 && (
             <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-2 py-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-              {/* 이전 날짜 (<) : 왼쪽(과거)으로 이동 */}
               <button
                 onClick={() => handleDateChange(availableDates[currentIndex - 1])}
                 disabled={currentIndex <= 0}
@@ -339,6 +337,7 @@ export default function BriefingPage() {
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
+              {/* 자동 스크롤 Ref 및 scroll-smooth 적용 */}
               <div 
                 ref={dateScrollRef} 
                 className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 scroll-smooth"
@@ -349,7 +348,7 @@ export default function BriefingPage() {
                   return (
                     <button
                       key={dStr}
-                      data-selected={isSelected} // 💡 data-selected 속성 추가
+                      data-selected={isSelected}
                       onClick={() => handleDateChange(dStr)}
                       className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shrink-0 ${
                         isSelected
@@ -377,7 +376,6 @@ export default function BriefingPage() {
                 })}
               </div>
 
-              {/* 다음 날짜 (>) : 오른쪽(최신)으로 이동 */}
               <button
                 onClick={() => handleDateChange(availableDates[currentIndex + 1])}
                 disabled={currentIndex >= availableDates.length - 1}
@@ -388,6 +386,23 @@ export default function BriefingPage() {
               </button>
             </div>
           )}
+
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={mainTab === 'stock' ? "종목/테마/지수 검색 (예: 반도체, 엔비디아, 코스피...)" : "키워드 검색 (예: 트럼프, 손흥민, 정부...)"}
+              className="w-full pl-10 pr-9 py-2.5 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition placeholder-slate-400 dark:placeholder-slate-500"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
 
           {loading ? (
             <div className="py-16 text-center text-slate-400 text-xs">
@@ -464,7 +479,7 @@ export default function BriefingPage() {
                 </div>
               </section>
 
-              {/* Highlights 3 lines (글자 크기 모드 적용 완료) */}
+              {/* Highlights 3 lines */}
               {briefing.highlights && briefing.highlights.length > 0 && (
                 <section className={`border rounded-2xl p-4 shadow-sm space-y-2.5 ${
                   mainTab === 'stock'
@@ -490,7 +505,7 @@ export default function BriefingPage() {
                 </section>
               )}
 
-              {/* News / Stock Sections List (글자 크기 모드 연동) */}
+              {/* News / Stock Sections List */}
               <div className="space-y-3.5">
                 {filteredSections.map((sec: BriefingSection) => (
                   <section
