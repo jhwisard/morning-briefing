@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react'; // 💡 useRef 추가
 import { supabase } from '@/lib/supabase';
 import { 
   Newspaper, TrendingUp, Sun, Moon, Search, X, Volume2, 
@@ -44,6 +44,18 @@ export default function BriefingPage() {
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<'stopped' | 'highlights' | 'all' | 'section'>('stopped');
+  // 💡 날짜 스크롤 컨테이너 참조 Ref 추가
+  const dateScrollRef = useRef<HTMLDivElement>(null);
+
+  // 💡 여기에 추가
+  useEffect(() => {
+    if (dateScrollRef.current) {
+      const selectedBtn = dateScrollRef.current.querySelector<HTMLElement>('[data-selected="true"]');
+      if (selectedBtn) {
+        selectedBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, [selectedDate, availableDates]);
 
   useEffect(() => {
     async function loadDatesForTab() {
@@ -314,7 +326,6 @@ export default function BriefingPage() {
         </header>
 
         <main className="max-w-2xl mx-auto px-4 pt-4 space-y-4">
-          
           {/* Date Navigator */}
           {availableDates.length > 0 && (
             <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-2 py-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
@@ -328,13 +339,17 @@ export default function BriefingPage() {
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
-              <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              <div 
+                ref={dateScrollRef} 
+                className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 scroll-smooth"
+              >
                 {availableDates.map((dStr, idx) => {
                   const isSelected = dStr === selectedDate;
-                  const isLatest = idx === availableDates.length - 1; // 💡 맨 오른쪽 항목에 최신 뱃지 표시
+                  const isLatest = idx === availableDates.length - 1;
                   return (
                     <button
                       key={dStr}
+                      data-selected={isSelected} // 💡 data-selected 속성 추가
                       onClick={() => handleDateChange(dStr)}
                       className={`px-3 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shrink-0 ${
                         isSelected
