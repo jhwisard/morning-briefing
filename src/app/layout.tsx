@@ -19,6 +19,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: 'cover', // 💡 필수 추가: 화면 상단 노치 영역까지 확장
+  themeColor: '#090d16', // 헤더/배경색과 일치
 };
 
 // 2. 검색엔진(SEO) 및 카카오톡/SNS 공유(Open Graph), 파비콘 메타데이터
