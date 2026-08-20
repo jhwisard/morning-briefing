@@ -45,8 +45,30 @@ export default function BriefingPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [ttsState, setTtsState] = useState<'stopped' | 'highlights' | 'all' | 'section'>('stopped');
 
-  // 날짜 가로 스크롤 컨테이너 Ref
+    // 날짜 가로 스크롤 컨테이너 Ref
   const dateScrollRef = useRef<HTMLDivElement>(null);
+
+  // 💡 모바일 브라우저 음성 목록 사전 로드 (비동기 초기화)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
+
+  // 💡 기기에 설치된 한국어 전용 보이스 탐색
+  const getKoreanVoice = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    return (
+      voices.find((v) => v.lang === 'ko-KR' || v.lang === 'ko_KR') ||
+      voices.find((v) => v.lang.startsWith('ko')) ||
+      voices.find((v) => v.name.toLowerCase().includes('korean') || v.name.includes('한국어')) ||
+      null
+    );
+  };
 
   // 날짜 로드 또는 변경 시 선택된 날짜 버튼으로 자동 가로 스크롤
   useEffect(() => {
@@ -144,14 +166,30 @@ export default function BriefingPage() {
       return;
     }
     stopTTS();
+
+    // 💡 모바일 오디오 세션 활성화
+    window.speechSynthesis.resume();
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ko-KR';
-    utterance.rate = 1.05;
+
+    // 💡 기기의 한국어 음성 객체 강제 할당
+    const koVoice = getKoreanVoice();
+    if (koVoice) {
+      utterance.voice = koVoice;
+    }
+
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
     utterance.onend = () => {
       stopTTS();
       if (onEnd) onEnd();
     };
-    utterance.onerror = () => stopTTS();
+    utterance.onerror = (err) => {
+      console.warn('TTS Error:', err);
+      stopTTS();
+    };
     window.speechSynthesis.speak(utterance);
   };
 
