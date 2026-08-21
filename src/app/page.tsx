@@ -427,7 +427,7 @@ export default function BriefingPage() {
                 }`}
               >
                 <TrendingUp className="w-3.5 h-3.5" />
-                <span>주식 브리핑</span>
+                <span>주식 모닝 브리핑</span>
               </button>
               <button
                 onClick={() => setMainTab('insight')}
