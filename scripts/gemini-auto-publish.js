@@ -9,6 +9,7 @@
  *   node scripts/gemini-auto-publish.js all      # 3대 콘텐츠 전체 순차 발행 (기본값)
  */
 
+// Next.js 내장 환경 변수 로더 (.env.local 자동 로드)
 const { loadEnvConfig } = require('@next/env');
 loadEnvConfig(process.cwd());
 
@@ -72,7 +73,7 @@ function getKSTDateInfo() {
   };
 }
 
-// 4. Supabase 연동용 JSON 스키마
+// 4. Supabase 연동용 JSON 스키마 (인사이트용)
 const briefingResponseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -110,7 +111,7 @@ const briefingResponseSchema = {
   required: ['title', 'weather', 'highlights', 'sections']
 };
 
-// 5. [간추린 뉴스] 시스템 프롬프트 (실시간 팩트 검색 강제)
+// 5. [간추린 뉴스] 시스템 프롬프트
 function getNewsSystemPrompt(dateInfo) {
   return `
 당신은 오늘(${dateInfo.isoDate}) 아침 실제 보도된 국내외 핵심 뉴스를 정밀하게 큐레이션하는 전문 팩트 기반 뉴스 브리퍼입니다.
@@ -146,10 +147,26 @@ function getNewsSystemPrompt(dateInfo) {
 7. 항목(item) 작성 규칙:
    - text: 구체적인 수치, 인명, 고유명사, 실제 대회명, 점수, 기관명을 반드시 포함한 명사형 종결 문장.
    - source: 실제 출처 언론사명만 깔끔하게 기재 (예: "연합뉴스", "로이터", "KBS", "MLB.com", "골프다이제스트", "스포츠조선" 등)
+
+[출력 포맷 규칙 - 엄격 준수]
+반드시 다른 설명 없이 아래 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요:
+{
+  "title": "${dateInfo.titleNews}",
+  "weather": "날씨 한 줄 요약",
+  "highlights": ["요약1", "요약2", "요약3"],
+  "sections": [
+    {
+      "id": "sec_1",
+      "category": "[美미국]",
+      "icon": "Globe",
+      "items": [{ "text": "내용", "source": "출처" }]
+    }
+  ]
+}
 `;
 }
 
-// 6. [주식 모닝 브리핑] 시스템 프롬프트 (실제 당일 증시 마감 수치 반영)
+// 6. [주식 모닝 브리핑] 시스템 프롬프트
 function getStockSystemPrompt(dateInfo) {
   return `
 당신은 매일 개장 전 글로벌 및 국내 증시 핵심 현황을 분석·전달하는 주식 시장 전문 애널리스트입니다.
@@ -175,6 +192,22 @@ function getStockSystemPrompt(dateInfo) {
      미국 증시 마감 분석, 국내 증시 수급 영향(외국인/기관 동향), 당일 공략 섹터 및 실전 대응 전략을 3~4개 항목으로 정리 (~함/임/있음/없음 종결, source: "시황 분석")
 6. 팩트 기반 원칙:
    - 지수 수치, 등락률, 종목명, 경제 지표 결과를 실제 사실에 기반하여 기술할 것.
+
+[출력 포맷 규칙 - 엄격 준수]
+반드시 다른 설명 없이 아래 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요:
+{
+  "title": "${dateInfo.titleStock}",
+  "weather": "마켓 분위기 한 줄 요약",
+  "highlights": ["포인트1", "포인트2", "포인트3"],
+  "sections": [
+    {
+      "id": "sec_1",
+      "category": "1. 해외 증시 마감 현황",
+      "icon": "TrendingUp",
+      "items": [{ "text": "내용", "source": "출처" }]
+    }
+  ]
+}
 `;
 }
 
@@ -192,13 +225,35 @@ function getInsightSystemPrompt(dateInfo) {
 
    - 섹션 1 (id: "sec_1", category: "1. 생각의 원점 : 길을 밝히는 한 줄의 지혜", icon: "Quote", items: 1개):
      * 신뢰할 수 있는 고전, 명저, 혹은 역사적 인물의 인용구를 3~4문장으로 정제하여 text에 작성합니다.
-     * source: 인용한 저자명과 도서명을 명확히 표기합니다. (예: "에픽테토스, 『담화록』", "빅터 프랭클, 『죽음의 수용소에서』")
+     * source: 인용한 저자명과 도서명을 명확히 표기합니다. (형식 예: "프리드리히 니체, 『차라투스트라는 이렇게 말했다』", "에픽테토스, 『담화록』", "빅터 프랭클, 『죽음의 수용소에서』")
 
    - 섹션 2 (id: "sec_2", category: "2. 마인드 피벗 : 나만의 기준을 세우는 시간", icon: "Compass", items: 1개):
      * 20대의 고민과 트렌드 관점에서 깊이 공감하고 스스로 기준을 세울 수 있도록 돕는 실천적 해설을 3~4문장으로 작성합니다.
      * 문체 규칙: 반드시 정중하고 단호한 경어체(~합니다, ~입니다)를 엄격히 유지합니다.
      * source: "마인드 피벗"으로 표기합니다.
 `;
+}
+
+// 💡 안전한 JSON 추출 헬퍼 함수
+function extractJson(rawText) {
+  if (!rawText) throw new Error('AI 응답이 비어있습니다.');
+  
+  // 1. ```json ... ``` 마크다운 블록 추출
+  const match = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const jsonStr = match ? match[1].trim() : rawText.trim();
+  
+  // 2. JSON 파싱 시도
+  try {
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    // 3. 실패 시 첫 번째 '{' 와 마지막 '}' 사이만 추출해서 파싱
+    const firstBrace = jsonStr.indexOf('{');
+    const lastBrace = jsonStr.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      return JSON.parse(jsonStr.substring(firstBrace, lastBrace + 1));
+    }
+    throw e;
+  }
 }
 
 // 8. 단일 브리핑 생성 및 DB 저장 함수
@@ -225,14 +280,16 @@ async function publishBriefing(categoryType) {
     : `Google Search를 사용하여 ${dateInfo.isoDate} 오늘 기준 국내외 8대 분야 최신 실시간 헤드라인 뉴스와 스포츠 뉴스를 검색하고 [간추린 뉴스] JSON 데이터를 생성하세요. 과거 지나간 뉴스나 가상의 사실을 절대 생성하지 마세요.`;
 
   try {
-    const config = {
+    let config = {
       systemInstruction: systemPrompt,
-      responseMimeType: 'application/json',
-      responseSchema: briefingResponseSchema,
       temperature: isInsight ? 0.7 : 0.1
     };
 
-    if (!isInsight) {
+    // 💡 핵심: googleSearch 툴 사용 시에는 responseMimeType 설정을 제거하고, 인사이트만 Schema 사용
+    if (isInsight) {
+      config.responseMimeType = 'application/json';
+      config.responseSchema = briefingResponseSchema;
+    } else {
       config.tools = [{ googleSearch: {} }];
     }
 
@@ -242,9 +299,8 @@ async function publishBriefing(categoryType) {
       config: config
     });
 
-    // 💡 안전한 JSON 파싱 처리
-    const cleanJson = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(cleanJson);
+    // 💡 안전한 JSON 파싱 (마크다운 코드 블록 대응)
+    const parsedData = extractJson(response.text);
 
     console.log(`✅ [${displayCategory}] Gemini 생성 완료: "${parsedData.title}"`);
     console.log(`📊 생성된 섹션 수: ${parsedData.sections.length}개 / 요약: ${parsedData.highlights.length}개`);
