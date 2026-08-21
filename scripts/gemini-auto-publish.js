@@ -9,6 +9,10 @@
  *   node scripts/gemini-auto-publish.js all      # 3대 콘텐츠 전체 순차 발행 (기본값)
  */
 
+// 💡 Next.js 내장 환경 변수 로더 (.env.local 자동 로드)
+const { loadEnvConfig } = require('@next/env');
+loadEnvConfig(process.cwd());
+
 const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
 
