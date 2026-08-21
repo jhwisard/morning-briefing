@@ -33,6 +33,7 @@ export interface Briefing {
   created_at: string;
 }
 
+// 오디오 재생 상태 타입 (배타적 토글 제어용)
 type TTSStatus = {
   type: 'stopped' | 'highlights' | 'all' | 'section';
   targetId?: string;
@@ -42,7 +43,7 @@ export default function BriefingPage() {
   const [mainTab, setMainTab] = useState<'news' | 'stock' | 'insight'>('news');
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [briefing, setBriefing] = useState<Briefing null |>(null);
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentCategory, setCurrentCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,17 +51,20 @@ export default function BriefingPage() {
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // 통합 배타적 TTS 상태 및 발화체 추적 Ref
+  // 통합 배타적 TTS 상태
   const [ttsState, setTtsState] = useState<TTSStatus>({ type: 'stopped' });
-  const currentUtteranceRef = useRef<SpeechSynthesisUtterance null |>(null);
   
   // 방문자 카운트 통계 상태
   const [visitorStats, setVisitorStats] = useState<{ today: number; total: number } | null>(null);
 
   // 날짜 가로 스크롤 컨테이너 Ref
   const dateScrollRef = useRef<HTMLDivElement>(null);
+  
+  // 💡 현재 재생 중인 음성 객체 추적 Ref (이벤트 간섭 차단용)
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // 1. 모바일 브라우저 음성 목록 사전 로드
+
+  // 1. 모바일 브라우저 음성 목록 사전 로드 (비동기 초기화)
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
@@ -123,7 +127,7 @@ export default function BriefingPage() {
         .from('briefings')
         .select('briefing_date')
         .eq('category_type', mainTab)
-        .order('briefing_date', { ascending: true });
+        .order('briefing_date', { ascending: true }); // 과거 -> 최신순 정렬
 
       if (dateError || !dateRows || dateRows.length === 0) {
         setAvailableDates([]);
@@ -135,6 +139,7 @@ export default function BriefingPage() {
       const uniqueDates = Array.from(new Set(dateRows.map(r => r.briefing_date)));
       setAvailableDates(uniqueDates);
 
+      // 맨 오른쪽 최신 날짜 기본 선택
       const latestDate = uniqueDates[uniqueDates.length - 1];
       setSelectedDate(latestDate);
       await fetchBriefing(mainTab, latestDate);
@@ -186,7 +191,7 @@ export default function BriefingPage() {
     setTimeout(() => setToastMsg(null), 2000);
   };
 
-  // --- TTS 오디오 배타적 토글 제어 ---
+  // --- TTS 오디오 인터랙션 제어 ---
   const getKoreanVoice = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
@@ -200,6 +205,7 @@ export default function BriefingPage() {
 
   const stopTTS = () => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      // 💡 이전 음성의 비동기 콜백을 먼저 완전히 끊어버림
       if (currentUtteranceRef.current) {
         currentUtteranceRef.current.onend = null;
         currentUtteranceRef.current.onerror = null;
@@ -215,9 +221,12 @@ export default function BriefingPage() {
       alert('음성 읽기를 지원하지 않는 브라우저입니다.');
       return;
     }
+    
+    // 1. 기존 재생 중이던 음성 취소 및 콜백 무효화
     stopTTS();
     window.speechSynthesis.resume();
 
+    // 2. 새 음성 객체 생성
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ko-KR';
     const koVoice = getKoreanVoice();
@@ -227,25 +236,31 @@ export default function BriefingPage() {
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
+    // 3. 현재 발화체 Ref에 등록
     currentUtteranceRef.current = utterance;
 
+    // 4. 이벤트 핸들러: 자신이 최신 발화체일 때만 상태를 stopped로 전환
     utterance.onend = () => {
       if (currentUtteranceRef.current === utterance) {
         currentUtteranceRef.current = null;
         setTtsState({ type: 'stopped' });
       }
     };
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
+      // cancel() 등으로 인한 강제 중단 에러(interrupted/canceled)는 무시하고, 실제 종료일 때만 처리
       if (currentUtteranceRef.current === utterance) {
         currentUtteranceRef.current = null;
         setTtsState({ type: 'stopped' });
       }
     };
 
+    // 5. 상태 변경 및 재생
     setTtsState(newStatus);
     window.speechSynthesis.speak(utterance);
   };
 
+
+  // 1) 요약 재생 토글
   const toggleHighlightsTTS = () => {
     if (ttsState.type === 'highlights') {
       stopTTS();
@@ -257,6 +272,7 @@ export default function BriefingPage() {
     speakText(text, { type: 'highlights' });
   };
 
+  // 2) 전체 듣기 토글
   const toggleAllTTS = () => {
     if (ttsState.type === 'all') {
       stopTTS();
@@ -273,6 +289,7 @@ export default function BriefingPage() {
     speakText(script, { type: 'all' });
   };
 
+  // 3) 개별 카드 스피커 토글
   const toggleSectionTTS = (sec: BriefingSection) => {
     if (ttsState.type === 'section' && ttsState.targetId === sec.id) {
       stopTTS();
@@ -314,7 +331,7 @@ export default function BriefingPage() {
     <div className={isDark ? 'dark' : ''}>
       <div className="bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen transition-colors duration-200 antialiased font-sans pb-16">
         
-        {/* Sticky Header */}
+        {/* Sticky Header (아이폰 Safe Area 패딩 및 마스킹 적용) */}
         <header className="sticky top-0 z-50 transform-gpu bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm pt-[env(safe-area-inset-top,0px)] transition-colors">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -326,11 +343,11 @@ export default function BriefingPage() {
                   : 'bg-gradient-to-tr from-sky-500 to-indigo-600 shadow-sky-500/20'
               }`}>
                 {mainTab === 'stock' ? (
-                  <TrendingUp className="w-5 h-5"/>
+                  <TrendingUp className="w-5 h-5" />
                 ) : mainTab === 'insight' ? (
-                  <Lightbulb className="w-5 h-5"/>
+                  <Lightbulb className="w-5 h-5" />
                 ) : (
-                  <Newspaper className="w-5 h-5"/>
+                  <Newspaper className="w-5 h-5" />
                 )}
               </div>
               <div>
@@ -375,14 +392,14 @@ export default function BriefingPage() {
                 className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
                 title="전체 복사"
               >
-                <Share2 className="w-4 h-4"/>
+                <Share2 className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setIsDark(!isDark)}
                 className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
                 title="다크 모드 전환"
               >
-                {isDark ? <Sun className="w-4 h-4 text-amber-400"/> : <Moon className="w-4 h-4 text-slate-600"/>}
+                {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
               </button>
             </div>
           </div>
@@ -398,7 +415,7 @@ export default function BriefingPage() {
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
-                <Newspaper className="w-3.5 h-3.5"/>
+                <Newspaper className="w-3.5 h-3.5" />
                 <span>간추린 뉴스</span>
               </button>
               <button
@@ -409,8 +426,8 @@ export default function BriefingPage() {
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
-                <TrendingUp className="w-3.5 h-3.5"/>
-                <span>주식 브리핑</span>
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>주식 모닝 브리핑</span>
               </button>
               <button
                 onClick={() => setMainTab('insight')}
@@ -420,7 +437,7 @@ export default function BriefingPage() {
                     : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
                 }`}
               >
-                <Lightbulb className="w-3.5 h-3.5"/>
+                <Lightbulb className="w-3.5 h-3.5" />
                 <span>데일리 인사이트</span>
               </button>
             </div>
@@ -430,7 +447,7 @@ export default function BriefingPage() {
           {briefing?.weather && (
             <div className="max-w-2xl mx-auto px-4 pb-2.5 pt-0">
               <div className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-2.5 py-1 rounded-full border border-amber-200/60 dark:border-amber-900/50 text-xs">
-                <SunMedium className="w-3.5 h-3.5 text-amber-500 shrink-0"/>
+                <SunMedium className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 <span className="font-medium truncate">{briefing.weather}</span>
               </div>
             </div>
@@ -448,7 +465,7 @@ export default function BriefingPage() {
                 className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 disabled:opacity-20 disabled:cursor-not-allowed transition"
                 title="이전 날짜"
               >
-                <ChevronLeft className="w-4 h-4"/>
+                <ChevronLeft className="w-4 h-4" />
               </button>
 
               <div 
@@ -473,7 +490,7 @@ export default function BriefingPage() {
                           : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
-                      <Calendar className="w-3 h-3"/>
+                      <Calendar className="w-3 h-3" />
                       <span>{formatDateLabel(dStr)}</span>
                       {isLatest && (
                         <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${
@@ -499,14 +516,14 @@ export default function BriefingPage() {
                 className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 disabled:opacity-20 disabled:cursor-not-allowed transition"
                 title="다음 날짜"
               >
-                <ChevronRight className="w-4 h-4"/>
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           )}
 
           {/* Search Bar */}
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
@@ -515,14 +532,14 @@ export default function BriefingPage() {
                 mainTab === 'stock' 
                   ? "종목/테마/지수 검색 (예: 반도체, 엔비디아, 코스피...)" 
                   : mainTab === 'insight'
-                  ? "인사이트 키워드 검색 (예: 마인드셋, 실행력, 자존감...)"
+                  ? "인사이트 키워드 검색 (예: 마인드셋, 실행력, AI 혁신...)"
                   : "키워드 검색 (예: 정책, 글로벌 이슈, 경제...)"
               }
               className="w-full pl-10 pr-9 py-2.5 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition placeholder-slate-400 dark:placeholder-slate-500"
             />
             {searchQuery && (
               <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <X className="w-4 h-4"/>
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
@@ -564,7 +581,7 @@ export default function BriefingPage() {
                 ))}
               </nav>
 
-              {/* Audio TTS Banner */}
+              {/* Audio TTS Banner (토글 인터랙션 적용) */}
               <section className={`text-white rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                 mainTab === 'stock'
                   ? 'bg-gradient-to-r from-emerald-600 to-teal-700'
@@ -574,7 +591,7 @@ export default function BriefingPage() {
               }`}>
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-md flex items-center justify-center shrink-0">
-                    <Headphones className="w-5 h-5"/>
+                    <Headphones className="w-5 h-5" />
                   </div>
                   <div>
                     <div className="text-[11px] font-medium text-amber-100 flex items-center gap-1">
@@ -593,14 +610,14 @@ export default function BriefingPage() {
                     onClick={toggleHighlightsTTS}
                     className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-white text-slate-900 hover:bg-slate-50 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
                   >
-                    {ttsState.type === 'highlights' ? <Square className="w-3.5 h-3.5 fill-current"/> : <Play className="w-3.5 h-3.5 fill-current"/>}
+                    {ttsState.type === 'highlights' ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
                     <span>{ttsState.type === 'highlights' ? '정지' : '요약 재생'}</span>
                   </button>
                   <button
                     onClick={toggleAllTTS}
                     className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-black/20 hover:bg-black/30 text-white font-medium text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95"
                   >
-                    {ttsState.type === 'all' ? <Square className="w-3.5 h-3.5 fill-current"/> : <ListMusic className="w-3.5 h-3.5"/>}
+                    {ttsState.type === 'all' ? <Square className="w-3.5 h-3.5 fill-current" /> : <ListMusic className="w-3.5 h-3.5" />}
                     <span>{ttsState.type === 'all' ? '정지' : '전체 듣기'}</span>
                   </button>
                 </div>
@@ -623,7 +640,7 @@ export default function BriefingPage() {
                         ? 'text-amber-800 dark:text-amber-300'
                         : 'text-sky-700 dark:text-sky-300'
                     }`}>
-                      <Sparkles className="w-4 h-4 text-amber-500"/>
+                      <Sparkles className="w-4 h-4 text-amber-500" />
                       {mainTab === 'stock' ? '오늘의 마켓 핵심 포인트 3줄 요약' : mainTab === 'insight' ? '오늘의 생각과 마인드셋 3줄 요약' : '오늘의 핵심 키워드 3줄 요약'}
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">{briefing.briefing_date}</span>
@@ -638,8 +655,8 @@ export default function BriefingPage() {
                 </section>
               )}
 
-              {/* Sections List */}
-              <div className="space-y-3.5">
+              {/* Sections List (데일리 인사이트 가독성 극대화 포맷 적용) */}
+              <div className="space-y-4">
                 {filteredSections.map((sec: BriefingSection) => {
                   const isPlayingThis = ttsState.type === 'section' && ttsState.targetId === sec.id;
                   const isQuoteSection = sec.category.includes('생각의 원점') || sec.category.includes('1.');
@@ -648,20 +665,20 @@ export default function BriefingPage() {
                   return (
                     <section
                       key={sec.id}
-                      className={`rounded-2xl p-4 sm:p-5 shadow-sm border transition ${
+                      className={`rounded-2xl p-4 sm:p-6 shadow-sm border transition ${
                         mainTab === 'insight' && isQuoteSection
-                          ? 'bg-gradient-to-br from-amber-50/70 to-orange-50/40 dark:from-amber-950/20 dark:to-slate-900 border-amber-200/80 dark:border-amber-800/60'
+                          ? 'bg-gradient-to-br from-amber-50/80 via-white to-orange-50/40 dark:from-amber-950/30 dark:via-slate-900 dark:to-slate-900 border-amber-200/80 dark:border-amber-800/60'
                           : mainTab === 'insight' && isPivotSection
-                          ? 'bg-gradient-to-br from-emerald-50/70 to-teal-50/40 dark:from-emerald-950/20 dark:to-slate-900 border-emerald-200/80 dark:border-emerald-800/60'
+                          ? 'bg-gradient-to-br from-emerald-50/80 via-white to-teal-50/40 dark:from-emerald-950/30 dark:via-slate-900 dark:to-slate-900 border-emerald-200/80 dark:border-emerald-800/60'
                           : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-                      } space-y-3`}
+                      } space-y-3.5`}
                     >
                       <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800/80">
                         <div className="flex items-center gap-2">
                           {mainTab === 'insight' && isQuoteSection ? (
-                            <Quote className="w-4 h-4 text-amber-500"/>
+                            <Quote className="w-4 h-4 text-amber-500" />
                           ) : mainTab === 'insight' && isPivotSection ? (
-                            <Compass className="w-4 h-4 text-emerald-500"/>
+                            <Compass className="w-4 h-4 text-emerald-500" />
                           ) : null}
                           <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">
                             {sec.category}
@@ -671,6 +688,7 @@ export default function BriefingPage() {
                           </span>
                         </div>
 
+                        {/* 개별 카드 스피커 토글 버튼 */}
                         <button
                           onClick={() => toggleSectionTTS(sec)}
                           title={isPlayingThis ? "재생 중지" : "이 섹션만 듣기"}
@@ -680,46 +698,93 @@ export default function BriefingPage() {
                               : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
                           }`}
                         >
-                          {isPlayingThis ? <Square className="w-4 h-4 fill-current"/> : <Volume2 className="w-4 h-4"/>}
+                          {isPlayingThis ? <Square className="w-4 h-4 fill-current" /> : <Volume2 className="w-4 h-4" />}
                         </button>
                       </div>
 
-                      <ul className="space-y-3">
-                        {sec.items.map((item: NewsItem, itemIdx: number) => (
-                          <li key={itemIdx} className="flex items-start gap-2 group">
-                            <span className={`font-bold select-none text-xs sm:text-sm mt-0.5 ${
-                              mainTab === 'stock' 
-                                ? 'text-emerald-500' 
-                                : mainTab === 'insight'
-                                ? 'text-amber-500'
-                                : 'text-sky-500'
-                            }`}>
-                              {mainTab === 'insight' && isQuoteSection ? '“' : '◐'}
-                            </span>
-                            <div className="flex-1 space-y-1">
-                              <p className={`text-slate-800 dark:text-slate-200 leading-relaxed ${
-                                isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
-                              } ${mainTab === 'insight' && isQuoteSection ? 'italic font-medium' : ''}`}>
-                                {item.text}
-                              </p>
-                              <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
-                                <span className="inline-flex items-center gap-1">
-                                  <Bookmark className="w-3 h-3"/> {item.source}
-                                </span>
-                                <button
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(item.text);
-                                    showToast('항목이 복사되었습니다.');
-                                  }}
-                                  className="opacity-0 group-hover:opacity-100 hover:text-slate-600 dark:hover:text-slate-300 transition text-[10px]"
-                                >
-                                  복사
-                                </button>
+                      {/* 인사이트 전용 리딩 레이아웃 */}
+                      {mainTab === 'insight' ? (
+                        <div className="space-y-4 pt-1">
+                          {sec.items.map((item: NewsItem, itemIdx: number) => {
+                            // 마침표 기준으로 문장을 분리하여 자연스러운 호흡 부여
+                            const sentences = item.text
+                              .split(/(?<=[.!?])\s+/)
+                              .filter((s) => s.trim().length > 0);
+
+                            return (
+                              <div
+                                key={itemIdx}
+                                className={`rounded-xl p-3.5 sm:p-4 border-l-4 ${
+                                  isQuoteSection
+                                    ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20'
+                                    : 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20'
+                                } space-y-3`}
+                              >
+                                <div className={`space-y-2 text-slate-800 dark:text-slate-100 leading-loose ${
+                                  isLargeFont ? 'text-base sm:text-lg' : 'text-sm sm:text-[15px]'
+                                }`}>
+                                  {sentences.map((sentence, sIdx) => (
+                                    <p key={sIdx} className="tracking-normal font-normal">
+                                      {sentence}
+                                    </p>
+                                  ))}
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2 border-t border-slate-200/50 dark:border-slate-800/60 text-xs">
+                                  <span className={`font-medium ${
+                                    isQuoteSection ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'
+                                  }`}>
+                                    {isQuoteSection ? `— ${item.source}` : `✓ ${item.source}`}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(item.text);
+                                      showToast('내용이 복사되었습니다.');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition text-[11px]"
+                                  >
+                                    복사
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        /* 뉴스 / 주식 탭의 기존 컴팩트 리스트 뷰 유지 */
+                        <ul className="space-y-3">
+                          {sec.items.map((item: NewsItem, itemIdx: number) => (
+                            <li key={itemIdx} className="flex items-start gap-2 group">
+                              <span className={`font-bold select-none text-xs sm:text-sm mt-0.5 ${
+                                mainTab === 'stock' ? 'text-emerald-500' : 'text-sky-500'
+                              }`}>
+                                ◐
+                              </span>
+                              <div className="flex-1 space-y-1">
+                                <p className={`text-slate-800 dark:text-slate-200 leading-snug ${
+                                  isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
+                                }`}>
+                                  {item.text}
+                                </p>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Bookmark className="w-3 h-3" /> {item.source}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(item.text);
+                                      showToast('항목이 복사되었습니다.');
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 hover:text-slate-600 dark:hover:text-slate-300 transition text-[10px]"
+                                  >
+                                    복사
+                                  </button>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </section>
                   );
                 })}
@@ -728,10 +793,10 @@ export default function BriefingPage() {
           )}
         </main>
 
-        {/* 하단 방문자 카운터 (박스형 아웃라인) & 카피라이트 */}
+        {/* 💡 하단 방문자 카운터 (박스형 아웃라인 스타일) & 카피라이트 */}
         <footer className="max-w-2xl mx-auto px-4 mt-10 pt-6 pb-6 border-t border-slate-200/60 dark:border-slate-800/60 text-center">
           <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-xs text-slate-600 dark:text-slate-300 shadow-sm">
-            <Users className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400"/>
+            <Users className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
             <span>오늘 <strong className="text-slate-900 dark:text-white font-bold">{visitorStats ? visitorStats.today.toLocaleString() : '-'}</strong></span>
             <span className="text-slate-300 dark:text-slate-700">•</span>
             <span>누적 <strong className="text-slate-900 dark:text-white font-bold">{visitorStats ? visitorStats.total.toLocaleString() : '-'}</strong></span>
@@ -743,7 +808,7 @@ export default function BriefingPage() {
 
         {toastMsg && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-slate-900/90 text-white text-xs font-semibold shadow-xl border border-slate-700 backdrop-blur-md z-50 flex items-center gap-2 animate-fade-in">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400"/>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             <span>{toastMsg}</span>
           </div>
         )}
