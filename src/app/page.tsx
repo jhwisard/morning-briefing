@@ -710,25 +710,26 @@ export default function BriefingPage() {
                       {mainTab === 'insight' ? (
                         <div className="space-y-4 pt-1">
                           {sec.items.map((item: NewsItem, itemIdx: number) => {
-                            // 마침표 기준으로 문장을 분리하여 자연스러운 호흡 부여
+                            // 💡 마침표(.!?), 쉼표(,) 및 줄바꿈 기준으로 자연스러운 구절 분리 (숫자 쉼표 제외)
                             const sentences = item.text
-                              .split(/(?<=[.!?])\s+/)
-                              .filter((s) => s.trim().length > 0);
+                              .split(/(?<=[.!?]|\,(?!\d))\s+|\n+/)
+                              .map((s) => s.trim())
+                              .filter((s) => s.length > 0);
 
                             return (
                               <div
                                 key={itemIdx}
-                                className={`rounded-xl p-3.5 sm:p-4 border-l-4 ${
+                                className={`rounded-xl p-4 sm:p-5 border-l-4 shadow-sm ${
                                   isQuoteSection
-                                    ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20'
-                                    : 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20'
-                                } space-y-3`}
+                                    ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/20'
+                                    : 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
+                                } space-y-3.5`}
                               >
-                                <div className={`space-y-2 text-slate-800 dark:text-slate-100 leading-loose ${
+                                <div className={`space-y-2 text-slate-800 dark:text-slate-100 leading-relaxed ${
                                   isLargeFont ? 'text-base sm:text-lg' : 'text-sm sm:text-[15px]'
                                 }`}>
                                   {sentences.map((sentence, sIdx) => (
-                                    <p key={sIdx} className="tracking-normal font-normal">
+                                    <p key={sIdx} className="tracking-normal font-normal break-keep">
                                       {sentence}
                                     </p>
                                   ))}
