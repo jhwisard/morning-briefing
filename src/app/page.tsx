@@ -683,10 +683,14 @@ export default function BriefingPage() {
                           <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">
                             {sec.category}
                           </h2>
-                          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
-                            {sec.items.length}건
-                          </span>
+                          {/* 💡 데일리 인사이트 탭이 아닐 때만(뉴스/주식) 건수 뱃지 표시 */}
+                          {mainTab !== 'insight' && (
+                            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
+                              {sec.items.length}건
+                            </span>
+                          )}
                         </div>
+
 
                         {/* 개별 카드 스피커 토글 버튼 */}
                         <button
