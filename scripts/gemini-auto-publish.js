@@ -16,13 +16,30 @@ loadEnvConfig(process.cwd());
 const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
 
-// 1. 환경 변수 검증
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// 1. 환경 변수 가져오기 (변수명 호환성 및 공백/따옴표 제거)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
+let rawUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+const SUPABASE_SERVICE_ROLE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
+  process.env.SUPABASE_KEY || ''
+).trim().replace(/^["']|["']$/g, '');
 
-if (!GEMINI_API_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ 필수 환경 변수가 누락되었습니다: GEMINI_API_KEY, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+// https:// 누락 시 자동 보정
+if (rawUrl && !rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+  rawUrl = `https://${rawUrl}`;
+}
+const SUPABASE_URL = rawUrl;
+
+// 환경 변수 검증
+if (!GEMINI_API_KEY) {
+  console.error('❌ GEMINI_API_KEY가 설정되지 않았습니다. .env.local을 확인하세요.');
+  process.exit(1);
+}
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Supabase URL 또는 키가 설정되지 않았습니다.');
+  console.error(`- 감지된 URL: "${SUPABASE_URL}"`);
+  console.error(`- 감지된 키 존재 여부: ${Boolean(SUPABASE_SERVICE_ROLE_KEY)}`);
   process.exit(1);
 }
 
@@ -32,6 +49,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
   realtime: { createClient: false }
 });
+
 
 // 3. 한국 표준시(KST) 기준 날짜 계산
 function getKSTDateInfo() {
