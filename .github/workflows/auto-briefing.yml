@@ -15,6 +15,7 @@ on:
           - all
           - stock
           - news
+          - insight
  
 jobs:
   publish-briefings:
