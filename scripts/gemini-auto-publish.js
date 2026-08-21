@@ -1,11 +1,12 @@
 /**
  * scripts/gemini-auto-publish.js
- * Gemini 2.5 Flash 기반 '간추린 뉴스' & '주식 모닝 브리핑' 일일 자동 발행 스크립트
+ * Gemini 2.5 Flash 기반 '간추린 뉴스' & '주식 모닝 브리핑' & '데일리 인사이트' 일일 자동 발행 스크립트
  * 
  * 실행 옵션:
- *   node scripts/gemini-auto-publish.js stock   # 주식 모닝 브리핑만 발행
- *   node scripts/gemini-auto-publish.js news    # 간추린 뉴스만 발행
- *   node scripts/gemini-auto-publish.js all     # 둘 다 순차 발행 (기본값)
+ *   node scripts/gemini-auto-publish.js stock    # 주식 모닝 브리핑만 발행
+ *   node scripts/gemini-auto-publish.js news     # 간추린 뉴스만 발행
+ *   node scripts/gemini-auto-publish.js insight  # 데일리 인사이트만 발행
+ *   node scripts/gemini-auto-publish.js all      # 3대 콘텐츠 전체 순차 발행 (기본값)
  */
 
 const { GoogleGenAI, Type } = require('@google/genai');
@@ -53,8 +54,10 @@ function getKSTDateInfo() {
     isoDate: `${yyyy}-${mm}-${dd}`,
     titleStock: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 주식 모닝 브리핑`,
     titleNews: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 간추린 뉴스`,
+    titleInsight: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 데일리 인사이트`,
     headerStock: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`,
-    headerNews: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`
+    headerNews: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`,
+    headerInsight: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`
   };
 }
 
@@ -63,11 +66,11 @@ const briefingResponseSchema = {
   type: Type.OBJECT,
   properties: {
     title: { type: Type.STRING, description: '브리핑 표준 제목' },
-    weather: { type: Type.STRING, description: '마켓 요약 또는 날씨 한 줄 요약' },
+    weather: { type: Type.STRING, description: '마켓 요약 또는 날씨/테마 한 줄 요약' },
     highlights: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: '출근길 1분 핵심 3줄 요약'
+      description: '핵심 3줄 요약'
     },
     sections: {
       type: Type.ARRAY,
@@ -149,7 +152,7 @@ function getStockSystemPrompt(dateInfo) {
 4. highlights 필드:
    - 당일 시장을 관통하는 3대 핵심 포인트를 구체적 수치와 함께 작성 (정확히 3개 항목, ~함/임 종결)
 5. 전체 4대 섹션 구성 및 순서 (순서 변경 불가):
-   - 섹션 1 (id: "sec_1", category: "**1. 해외 증시 마감 현황**", icon: "TrendingUp"):
+   - 섹션 1 (id: "sec_1", category: "1. 해외 증시 마감 현황", icon: "TrendingUp"):
      다우 지수, S&P 500, 나스닥, 러셀 2000, 필라델피아 반도체 지수, MSCI 한국 지수 ETF, 야간 선물 등 7대 지수 마감 수치와 등락률(%), 원인 및 마감 동향을 1줄로 명시.
      * text 형식 예시:
        - "다우: 39,250.12 (+0.15%) - 에너지 및 방산주 강세로 소폭 상승 마감함."
@@ -160,22 +163,52 @@ function getStockSystemPrompt(dateInfo) {
        - "한국물: 72.80 (-1.55%) - 미국 증시 하락과 원화 약세 영향으로 동반 하락함."
        - "선물: 345.50 (-0.70%) - 미국 증시 하락분을 반영하며 국내 증시 개장 전 약세 흐름을 보임."
      * source는 각각 "다우", "S&P500", "나스닥", "소형주", "반도체", "한국물", "선물"로 지정.
-   - 섹션 2 (id: "sec_2", category: "**2. 오늘의 증시 키워드**", icon: "TrendingUp"):
+   - 섹션 2 (id: "sec_2", category: "2. 오늘의 증시 키워드", icon: "TrendingUp"):
      당일 글로벌/국내 시장을 관통하는 핵심 테마 및 이슈 4가지 (~함/임 종결, source: "핵심 키워드")
-   - 섹션 3 (id: "sec_3", category: "**3. 주요 주식 뉴스**", icon: "TrendingUp"):
+   - 섹션 3 (id: "sec_3", category: "3. 주요 주식 뉴스", icon: "TrendingUp"):
      시장 영향력이 큰 핵심 뉴스 4개. text 형식은 "[헤드라인]: 시장 영향 요약 설명" 형태로 작성하고, source에는 실제 출처 언론사 명시 (예: "로이터", "연합뉴스", "블룸버그" 등)
-   - 섹션 4 (id: "sec_4", category: "**4. 오늘의 시황 요약**", icon: "TrendingUp"):
+   - 섹션 4 (id: "sec_4", category: "4. 오늘의 시황 요약", icon: "TrendingUp"):
      미국 증시 마감 분석, 국내 증시 수급 영향(외국인/기관 동향), 당일 공략 섹터 및 실전 대응 전략을 3~4개 항목으로 정리. text는 "[요약 헤드라인]: [상세 전략/분석]" 또는 단일 완성 문장으로 작성 (~함/임/있음/없음 종결, source: "시황 분석")
 6. 팩트 기반 원칙:
    - 지수 수치, 등락률, 종목명, 구체적인 경제 지표 결과를 정확한 사실에 기반하여 기술할 것.
 `;
 }
 
-// 7. 단일 브리핑 생성 및 DB 저장 함수
+// 7. [💡 데일리 인사이트] 2단 시그니처 템플릿 시스템 프롬프트
+function getInsightSystemPrompt(dateInfo) {
+  return `
+당신은 20대 청년 및 현대인에게 삶의 단단한 중심과 지적 성찰을 제공하는 전문 인사이트 큐레이터이자 멘토입니다.
+아래의 [작성 규칙]을 철저히 준수하여 당일 아침 기준 '데일리 인사이트' JSON 데이터를 생성하세요.
+
+[작성 규칙]
+1. 제목: "${dateInfo.titleInsight}"
+2. weather 필드:
+   - 오늘 하루를 관통하는 영감과 테마 한 줄 메시지 (예: "남들의 속도에 조급해하지 않고, 나만의 단단한 방향을 세우는 하루")
+3. highlights 필드:
+   - 오늘 마음에 새길 3대 생각과 마인드셋 요약 (정확히 3개 항목, 각 1문장, 정중하고 울림 있는 어조)
+4. 섹션 구성 및 순서 (반드시 아래 2대 시그니처 섹션, 각 섹션 정확히 3개 항목으로 구성):
+
+   - 섹션 1 (id: "sec_1", category: "1. 생각의 원점 : 길을 밝히는 한 줄의 지혜", icon: "Quote", items: 3개):
+     * 고전 철학, 인문학, 세계적 명저, 석학 또는 위인들의 명언 및 문장 발췌
+     * text: 울림을 주는 핵심 인용구 및 그 속에 담긴 본질적 의미 해설
+     * source: 인용한 도서명 또는 발언자 (예: 《에픽테토스 담화록》, 《도덕경》, 《초격차》, 스티브 잡스 등)
+
+   - 섹션 2 (id: "sec_2", category: "2. 마인드 피벗 : 나만의 기준을 세우는 시간", icon: "Compass", items: 3개):
+     * 세상의 기준과 비교에 흔들리지 않고 나만의 중심을 잡기 위한 20대·청년 맞춤형 3대 실천 포인트
+     * text: 일상, 커리어, 인간관계에서 바로 적용할 수 있는 구체적인 관점 전환 및 행동 실천 가이드
+     * source: "실천 가이드" 또는 "마인드 피벗"
+
+5. 문체:
+   - 깊이 있고 품격 있는 성찰의 문체 (~함, ~임, ~을 권함, ~에 주목할 것).
+`;
+}
+
+// 8. 단일 브리핑 생성 및 DB 저장 함수
 async function publishBriefing(categoryType) {
   const dateInfo = getKSTDateInfo();
   const isStock = categoryType === 'stock';
-  const displayCategory = isStock ? '주식 모닝 브리핑' : '간추린 뉴스';
+  const isInsight = categoryType === 'insight';
+  const displayCategory = isStock ? '주식 모닝 브리핑' : isInsight ? '데일리 인사이트' : '간추린 뉴스';
 
   console.log(`\n========================================`);
   console.log(`🚀 [${dateInfo.isoDate}] ${displayCategory} 생성 및 Supabase 저장 시작`);
@@ -183,10 +216,14 @@ async function publishBriefing(categoryType) {
 
   const systemPrompt = isStock 
     ? getStockSystemPrompt(dateInfo) 
+    : isInsight
+    ? getInsightSystemPrompt(dateInfo)
     : getNewsSystemPrompt(dateInfo);
 
   const userPrompt = isStock
     ? `${dateInfo.headerStock} 기준 최신 글로벌 증시 마감 지표와 주요 뉴스를 반영하여 [주식 모닝 브리핑] JSON 데이터를 생성해 주세요.`
+    : isInsight
+    ? `${dateInfo.headerInsight} 기준 [생각의 원점] 명언 인용과 [마인드 피벗] 20대 맞춤형 실천 포인트를 담은 [데일리 인사이트] JSON 데이터를 생성해 주세요.`
     : `${dateInfo.headerNews} 기준 밤사이 발생한 국내외 톱 랭킹 뉴스와 스포츠/날씨를 반영하여 [간추린 뉴스] JSON 데이터를 생성해 주세요.`;
 
   try {
@@ -197,15 +234,15 @@ async function publishBriefing(categoryType) {
         systemInstruction: systemPrompt,
         responseMimeType: 'application/json',
         responseSchema: briefingResponseSchema,
-        temperature: 0.2
+        temperature: isInsight ? 0.7 : 0.2 // 인사이트는 풍부한 문장력을 위해 0.7 적용
       }
     });
 
     const parsedData = JSON.parse(response.text);
     console.log(`✅ [${displayCategory}] Gemini 생성 완료: "${parsedData.title}"`);
-    console.log(`📊 생성된 섹션 수: ${parsedData.sections.length}개`);
+    console.log(`📊 생성된 섹션 수: ${parsedData.sections.length}개 / 요약: ${parsedData.highlights.length}개`);
 
-    // 기존 당일 데이터 삭제 후 신규 등록 (UPSERT)
+    // 기존 당일 동일 카테고리 데이터 삭제 후 신규 등록 (UPSERT)
     const { error: delError } = await supabase
       .from('briefings')
       .delete()
@@ -239,7 +276,7 @@ async function publishBriefing(categoryType) {
   }
 }
 
-// 8. 메인 실행기
+// 9. 메인 실행기
 async function main() {
   const target = process.argv[2] || 'all';
 
@@ -248,10 +285,13 @@ async function main() {
       await publishBriefing('stock');
     } else if (target === 'news') {
       await publishBriefing('news');
+    } else if (target === 'insight') {
+      await publishBriefing('insight');
     } else {
-      // all: 간추린 뉴스 -> 주식 모닝 브리핑 순차 발행
+      // all: 간추린 뉴스 -> 주식 모닝 브리핑 -> 데일리 인사이트 순차 발행
       await publishBriefing('news');
       await publishBriefing('stock');
+      await publishBriefing('insight');
     }
     console.log('\n✨ 모든 브리핑 자동 발행 작업이 성공적으로 완료되었습니다.\n');
   } catch (e) {
