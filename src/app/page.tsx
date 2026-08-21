@@ -59,6 +59,10 @@ export default function BriefingPage() {
 
   // 날짜 가로 스크롤 컨테이너 Ref
   const dateScrollRef = useRef<HTMLDivElement>(null);
+  
+  // 💡 현재 재생 중인 음성 객체 추적 Ref (이벤트 간섭 차단용)
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
 
   // 1. 모바일 브라우저 음성 목록 사전 로드 (비동기 초기화)
   useEffect(() => {
@@ -201,6 +205,12 @@ export default function BriefingPage() {
 
   const stopTTS = () => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      // 💡 이전 음성의 비동기 콜백을 먼저 완전히 끊어버림
+      if (currentUtteranceRef.current) {
+        currentUtteranceRef.current.onend = null;
+        currentUtteranceRef.current.onerror = null;
+        currentUtteranceRef.current = null;
+      }
       window.speechSynthesis.cancel();
     }
     setTtsState({ type: 'stopped' });
@@ -211,9 +221,12 @@ export default function BriefingPage() {
       alert('음성 읽기를 지원하지 않는 브라우저입니다.');
       return;
     }
+    
+    // 1. 기존 재생 중이던 음성 취소 및 콜백 무효화
     stopTTS();
     window.speechSynthesis.resume();
 
+    // 2. 새 음성 객체 생성
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ko-KR';
     const koVoice = getKoreanVoice();
@@ -223,16 +236,29 @@ export default function BriefingPage() {
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
+    // 3. 현재 발화체 Ref에 등록
+    currentUtteranceRef.current = utterance;
+
+    // 4. 이벤트 핸들러: 자신이 최신 발화체일 때만 상태를 stopped로 전환
     utterance.onend = () => {
-      setTtsState({ type: 'stopped' });
+      if (currentUtteranceRef.current === utterance) {
+        currentUtteranceRef.current = null;
+        setTtsState({ type: 'stopped' });
+      }
     };
-    utterance.onerror = () => {
-      setTtsState({ type: 'stopped' });
+    utterance.onerror = (e) => {
+      // cancel() 등으로 인한 강제 중단 에러(interrupted/canceled)는 무시하고, 실제 종료일 때만 처리
+      if (currentUtteranceRef.current === utterance) {
+        currentUtteranceRef.current = null;
+        setTtsState({ type: 'stopped' });
+      }
     };
 
+    // 5. 상태 변경 및 재생
     setTtsState(newStatus);
     window.speechSynthesis.speak(utterance);
   };
+
 
   // 1) 요약 재생 토글
   const toggleHighlightsTTS = () => {
