@@ -50,6 +50,7 @@ export default function BriefingPage() {
   const [isLargeFont, setIsLargeFont] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [playbackRate, setPlaybackRate] = useState<number>(1.0);
 
   // 통합 배타적 TTS 상태
   const [ttsState, setTtsState] = useState<TTSStatus>({ type: 'stopped' });
@@ -186,6 +187,14 @@ export default function BriefingPage() {
     }
   };
 
+  const cyclePlaybackRate = () => {
+    const rates = [1.0, 1.2, 1.5, 0.8];
+    const nextIndex = (rates.indexOf(playbackRate) + 1) % rates.length;
+    const nextRate = rates[nextIndex];
+    setPlaybackRate(nextRate);
+    showToast(`재생 속도: ${nextRate}x`);
+  };
+
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2000);
@@ -233,7 +242,8 @@ export default function BriefingPage() {
     if (koVoice) {
       utterance.voice = koVoice;
     }
-    utterance.rate = 1.0;
+    // utterance.rate = 1.0;
+    utterance.rate = playbackRate;
     utterance.pitch = 1.0;
 
     // 3. 현재 발화체 Ref에 등록
@@ -606,6 +616,14 @@ export default function BriefingPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* 요약 재생 버튼 바로 앞에 추가 */}
+                  <button
+                    onClick={cyclePlaybackRate}
+                    className="px-2.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-mono font-bold text-xs border border-white/20 transition active:scale-95"
+                    title="재생 속도 변경"
+                  >
+                    {playbackRate}x
+                  </button>
                   <button
                     onClick={toggleHighlightsTTS}
                     className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-white text-slate-900 hover:bg-slate-50 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
