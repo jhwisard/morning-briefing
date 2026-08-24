@@ -42,20 +42,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   realtime: { createClient: false }
 });
 
-// 3. 한국 표준시(KST) 기준 날짜 계산 (YYYYMMDD 및 YYYY-MM-DD 지원)
+// 3. 한국 표준시(KST) 기준 날짜 계산 (YYYYMMDD 및 일/월요일 주말 휴장 플래그 지원)
 function getKSTDateInfo(targetDateStr) {
   let dateObj = new Date();
 
   if (targetDateStr) {
     const cleaned = String(targetDateStr).trim();
-    // 8자리 숫자 포맷 (예: 20260823) 대응
+    // 8자리 숫자 포맷 (예: 20260822) 대응
     if (/^\d{8}$/.test(cleaned)) {
       const y = cleaned.slice(0, 4);
       const m = cleaned.slice(4, 6);
       const d = cleaned.slice(6, 8);
       dateObj = new Date(`${y}-${m}-${d}T12:00:00+09:00`);
     } else {
-      // 일반 ISO 포맷 (예: 2026-08-23) 대응
       dateObj = new Date(`${cleaned}T12:00:00+09:00`);
     }
   }
@@ -75,11 +74,16 @@ function getKSTDateInfo(targetDateStr) {
   const yyyy = map.year;
   const mm = String(map.month).padStart(2, '0');
   const dd = String(map.day).padStart(2, '0');
-  const weekday = map.weekday;
+  const weekday = map.weekday; // '월', '화', '수', '목', '금', '토', '일'
   const shortYear = yyyy.slice(-2);
 
+  // 💡 일요일 또는 월요일 여부 판별 (미국 증시 주말 휴장 기준)
+  const isWeekendClosed = weekday === '일' || weekday === '월';
+
   return {
-    isoDate: `${yyyy}-${mm}-${dd}`, // DB 저장용 표준 포맷 (2026-08-23)
+    isoDate: `${yyyy}-${mm}-${dd}`,
+    weekday: weekday,
+    isWeekendClosed: isWeekendClosed,
     titleStock: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 주식 모닝 브리핑`,
     titleNews: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 간추린 뉴스`,
     headerStock: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`,
@@ -199,6 +203,12 @@ function getNewsSystemPrompt(dateInfo) {
 
 // 6. [주식 모닝 브리핑] 시스템 프롬프트
 function getStockSystemPrompt(dateInfo) {
+    // 💡 일/월요일 여부에 따른 섹션 1 지침 동적 분기
+  const marketCloseInstruction = dateInfo.isWeekendClosed
+    ? `* [주말 마감 표기 필수 (일/월요일 아침)]: 밤사이 미국 증시가 주말 휴장이므로, 직전 거래일(금요일) 마감 수치를 기재하고 요약 앞에 반드시 '[직전 거래일 마감]' 태그를 명시할 것.
+       - 형식 예시: "{지수명}: {금요일종가} ({등락률}%) - [직전 거래일 마감] {원인 및 주말 동향 요약}"`
+    : `* [정규장 마감 표기 (화~토요일 아침)]: 밤사이 마감된 정규장 실제 종가 수치와 등락률을 명시할 것 ('[직전 거래일 마감]' 태그 붙이지 말 것).
+       - 형식 예시: "{지수명}: {실제종가} ({등락률}%) - {마감 원인 한 줄 요약}"`;
   return `
 당신은 매일 개장 전 글로벌 및 국내 증시 핵심 현황을 분석·전달하는 주식 시장 전문 애널리스트입니다.
 구글 검색을 통해 ${dateInfo.isoDate} 기준 밤사이 실제 마감된 글로벌 지수 수치와 경제 지표를 정확히 검색하여 작성하세요.
@@ -206,39 +216,24 @@ function getStockSystemPrompt(dateInfo) {
 [작성 규칙]
 1. 제목: "${dateInfo.titleStock}"
 2. 문체 및 종결어미 규칙:
-   - 본문 전체의 문장 종결은 반드시 "~함", "~임", "~있음", "~없음" 스타일로 간결하고 명확하게 끝낼 것.
+   - 본문 전체의 문장 종결은 반드시 "~함", "~임", "~있음", "~없음" 스타일로 간결하게 끝낼 것.
+   - JSON 텍스트 내부에는 큰따옴표(") 대신 작은따옴표(')를 사용할 것.
 3. weather 필드:
    - 밤사이 실제 마감된 다우, S&P500, 나스닥 3대 지수 실제 등락률 및 장 분위기를 한 줄로 요약.
 4. highlights 필드:
    - 당일 시장을 관통하는 3대 핵심 포인트를 구체적 수치와 함께 작성 (정확히 3개 항목, ~함/임 종결)
 5. 전체 4대 섹션 구성 및 순서 (순서 변경 불가):
    - 섹션 1 (id: "sec_1", category: "1. 해외 증시 마감 현황", icon: "TrendingUp", items: 7개):
-     다우(Dow), S&P 500, 나스닥(Nasdaq), 러셀 2000, 필라델피아 반도체(SOX), MSCI 한국 지수 ETF(EWY), 코스피200 야간선물(또는 NDF 환율) 7개 지표의 '가장 최근 영업일 실제 마감 종가와 등락률(%)', 핵심 원인을 1줄 작성.
-
-     [일자별 표기 및 수치 검증 규칙]
-     1) 화~토요일 실행:
-        - 밤사이 정규장(월~금 마감)의 실제 확정 종가와 등락률을 그대로 작성함 (태그 불필요).
-        - 형식: "{지표명}: {실제종가} ({등락률}%) - {마감 원인 한 줄 요약}"
-     2) 일~월요일 실행:
-        - 주말 휴장으로 인해 직전 금요일 종가를 반영하며, 요약 앞에 '[직전 거래일 마감]'을 표기함.
-        - 형식: "{지표명}: {금요일종가} ({등락률}%) - [직전 거래일 마감] {원인 및 주말 동향 요약}"
-     3) 미국 공휴일 휴장(노동절, 추수감사절, 크리스마스 등 평일 휴장 직후 아침):
-        - 휴장일 당일은 거래가 없었으므로 종가 뒤에 '(휴장)'을 표기하고, 직전 거래일 종가 유지 또는 선물/글로벌 동향을 요약함.
-        - 형식: "{지표명}: {직전종가} (휴장) - [{휴장명} 휴장] {글로벌 매크로 이슈 또는 직전 마감 동향 요약}"
-     4) 팩트 검증 (필수):
-        - 실제 현실의 지수 범위를 벗어난 가상의 수치를 생성하지 말고, 반드시 실시간 검색된 공식 종가를 작성할 것.
-        - www.investing.com 에서 검색된 실제 종가를 작성할 것.
-        
-     * 야간선물 검색 팁: '코스피200 야간선물 종가' 또는 '야간선물 마감'으로 검색하되, 정확한 포인트 수치가 검색되지 않을 경우 'NDF 역외환율' 마감 수치나 코스피 야간선물 등락률(%)을 기재할 것.
-     * source: "다우", "S&P500", "나스닥", "러셀 2000", "필라델피아 반도체", "한국물", "선물"
+     다우(Dow), S&P 500, 나스닥(Nasdaq), 러셀 2000, 필라델피아 반도체(SOX), MSCI 한국 지수 ETF(EWY), 코스피200 야간선물(또는 NDF 환율) 7개 지표의 실제 종가와 등락률(%), 핵심 원인을 1줄 작성.
+     ${marketCloseInstruction}
+     * 야간선물 검색 팁: '코스피200 야간선물 종가' 또는 '야간선물 마감'으로 검색하되, 수치 미확인 시 'NDF 역외환율' 마감 수치나 코스피 야간선물 등락률(%)을 기재할 것.
+     * source: "다우", "S&P500", "나스닥", "러셀 2000", "필라델피아 반도체", "한국물", "선물"로 지정.
 
    - 섹션 2 (id: "sec_2", category: "2. 오늘의 증시 키워드", icon: "TrendingUp", items: 4개):
-     밤사이 미국 증시 마감 결과를 관통하는 핵심 테마 및 이슈 4가지 선별 (예: 빅테크 실적, 금리/국채금리, 유가/원자재, 정책 이슈 등) (~함/임 종결, source: "핵심 키워드")
+     시장 마감 결과를 관통하는 핵심 테마 및 이슈 4가지 (~함/임 종결, source: "핵심 키워드")
 
    - 섹션 3 (id: "sec_3", category: "3. 주요 주식 뉴스", icon: "TrendingUp", items: 4개):
-     글로벌 및 국내 증시에 파급력이 큰 핵심 뉴스 4개.
-     * text 형식: "[헤드라인]: 시장 및 특정 산업 영향 요약 설명" (~함/임 종결)
-     * source: 실제 출처 언론사 명시 (예: "로이터", "블룸버그", "연합뉴스", "한국경제" 등)
+     글로벌 및 국내 증시 핵심 뉴스 4개. "[헤드라인]: 시장 영향 요약 설명" 형식 (~함/임 종결, source: 언론사명)
 
    - 섹션 4 (id: "sec_4", category: "4. 국내 증시 투자 전략", icon: "TrendingUp", items: 4개):
      앞선 섹션 1~3의 글로벌 시황과 뉴스를 종합 분석하여 작성하는 국내 증시 실전 가이드 (총 4개 항목):
