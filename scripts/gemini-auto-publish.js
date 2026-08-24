@@ -339,7 +339,6 @@ async function publishBriefing(categoryType) {
     : getNewsSystemPrompt(dateInfo);
 
     const userPrompt = isStock
-    const userPrompt = isStock
     ? `Google Search를 활용하여 ${dateInfo.isoDate} 기준 최근 마감된 미국 뉴욕증시(다우, S&P500, 나스닥, 반도체 등) 동향 및 금융 뉴스를 검색하고, 시스템 프롬프트 규격에 맞는 단일 JSON 블록으로만 [주식 모닝 브리핑]을 작성하세요. 다른 인사말이나 설명 문장은 일절 포함하지 마세요.`
     // ? `Google Search를 활용하여 ${dateInfo.isoDate} 기준 가장 최근 마감된 미국 뉴욕증시 3대 지수(다우, S&P500, 나스닥) 및 필라델피아 반도체, 러셀2000, EWY의 '실제 종가와 등락률'을 정확히 확인한 후 [주식 모닝 브리핑] JSON 데이터를 생성하세요. 임의의 수치 생성을 절대 금지합니다.`
     : isInsight
