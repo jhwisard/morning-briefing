@@ -470,7 +470,7 @@ export default function BriefingPage() {
 
               <div 
                 ref={dateScrollRef} 
-                className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 scroll-smooth"
+                className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-0.5 scroll-smooth"
               >
                 {availableDates.map((dStr, idx) => {
                   const isSelected = dStr === selectedDate;
@@ -555,7 +555,7 @@ export default function BriefingPage() {
           ) : (
             <>
               {/* Category Sub-tabs */}
-              <nav className="flex gap-1.5 overflow-x-auto py-1 no-scrollbar text-xs font-medium">
+              <nav className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-1 text-xs font-medium"></nav>
                 <button
                   onClick={() => setCurrentCategory('all')}
                   className={`px-3 py-1.5 rounded-full transition whitespace-nowrap ${
