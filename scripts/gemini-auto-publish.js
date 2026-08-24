@@ -42,9 +42,24 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   realtime: { createClient: false }
 });
 
-// 3. 한국 표준시(KST) 기준 날짜 계산
-function getKSTDateInfo() {
-  const now = new Date();
+// 3. 한국 표준시(KST) 기준 날짜 계산 (YYYYMMDD 및 YYYY-MM-DD 지원)
+function getKSTDateInfo(targetDateStr) {
+  let dateObj = new Date();
+
+  if (targetDateStr) {
+    const cleaned = String(targetDateStr).trim();
+    // 8자리 숫자 포맷 (예: 20260823) 대응
+    if (/^\d{8}$/.test(cleaned)) {
+      const y = cleaned.slice(0, 4);
+      const m = cleaned.slice(4, 6);
+      const d = cleaned.slice(6, 8);
+      dateObj = new Date(`${y}-${m}-${d}T12:00:00+09:00`);
+    } else {
+      // 일반 ISO 포맷 (예: 2026-08-23) 대응
+      dateObj = new Date(`${cleaned}T12:00:00+09:00`);
+    }
+  }
+
   const formatter = new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
     year: 'numeric',
@@ -53,7 +68,7 @@ function getKSTDateInfo() {
     weekday: 'short'
   });
 
-  const parts = formatter.formatToParts(now);
+  const parts = formatter.formatToParts(dateObj);
   const map = {};
   parts.forEach(p => (map[p.type] = p.value));
 
@@ -64,7 +79,7 @@ function getKSTDateInfo() {
   const shortYear = yyyy.slice(-2);
 
   return {
-    isoDate: `${yyyy}-${mm}-${dd}`,
+    isoDate: `${yyyy}-${mm}-${dd}`, // DB 저장용 표준 포맷 (2026-08-23)
     titleStock: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 주식 모닝 브리핑`,
     titleNews: `${yyyy}년 ${parseInt(mm)}월 ${parseInt(dd)}일(${weekday}) 간추린 뉴스`,
     headerStock: `'${shortYear}-${parseInt(mm)}/${parseInt(dd)}(${weekday})`,
@@ -322,8 +337,8 @@ function extractJson(rawText) {
 }
 
 // 8. 단일 브리핑 생성 및 DB 저장 함수
-async function publishBriefing(categoryType) {
-  const dateInfo = getKSTDateInfo();
+async function publishBriefing(categoryType, targetDateStr) {
+  const dateInfo = getKSTDateInfo(targetDateStr);
   const isStock = categoryType === 'stock';
   const isInsight = categoryType === 'insight';
   const displayCategory = isStock ? '주식 모닝 브리핑' : isInsight ? '데일리 인사이트' : '간추린 뉴스';
@@ -403,21 +418,22 @@ async function publishBriefing(categoryType) {
 // 9. 메인 실행기
 async function main() {
   const target = process.argv[2] || 'all';
+  const targetDateStr = process.argv[3] || null; // 예: '20260823'
 
   try {
     if (target === 'stock') {
-      await publishBriefing('stock');
+      await publishBriefing('stock', targetDateStr);
     } else if (target === 'news') {
-      await publishBriefing('news');
+      await publishBriefing('news', targetDateStr);
     } else if (target === 'insight') {
-      await publishBriefing('insight');
+      await publishBriefing('insight', targetDateStr);
     } else {
       // all: 간추린 뉴스 -> 주식 모닝 브리핑 -> 데일리 인사이트 순차 발행
-      await publishBriefing('news');
-      await publishBriefing('stock');
-      await publishBriefing('insight');
+      await publishBriefing('news', targetDateStr);
+      await publishBriefing('stock', targetDateStr);
+      await publishBriefing('insight', targetDateStr);
     }
-    console.log('\n✨ 모든 브리핑 자동 발행 작업이 성공적으로 완료되었습니다.\n');
+    console.log(`\n✨ [${targetDateStr || '오늘'}] 모든 브리핑 자동 발행 작업이 완료되었습니다.\n`);
   } catch (e) {
     console.error('\n💥 프로세스 실행 중단:', e.message);
     process.exit(1);
