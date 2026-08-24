@@ -2,8 +2,9 @@ name: Daily Auto Morning Briefing
 
 on:
   schedule:
-    # UTC 21:30 = KST 06:30 (월~금 아침 개장 전 자동 실행)
-    - cron: '30 21 * * 0-4'
+    # 💡 UTC 22:00 = KST 다음날 07:00
+    # 월~금 평일 실행: '0 22 * * 0-4' (매일 실행하려면 '0 22 * * *' 사용)
+    - cron: '0 22 * * *'
   workflow_dispatch:
     inputs:
       category:
