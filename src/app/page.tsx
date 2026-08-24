@@ -555,7 +555,7 @@ export default function BriefingPage() {
           ) : (
             <>
               {/* Category Sub-tabs */}
-              <nav className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-1 text-xs font-medium"></nav>
+              <nav className="flex gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-1 text-xs font-medium">
                 <button
                   onClick={() => setCurrentCategory('all')}
                   className={`px-3 py-1.5 rounded-full transition whitespace-nowrap ${
