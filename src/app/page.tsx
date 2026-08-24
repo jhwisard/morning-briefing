@@ -727,6 +727,15 @@ export default function BriefingPage() {
                       {/* 인사이트 전용 리딩 레이아웃 */}
                       {mainTab === 'insight' ? (
                         <div className="space-y-4 pt-1">
+                          {/* 💡 briefing.title에서 '데일리 인사이트 |' 뒤의 핵심 문구만 추출 */}
+                          {isQuoteSection && briefing?.title && briefing.title.includes('|') && (
+                            <div className="text-center py-2 px-4 rounded-xl bg-amber-100/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 shadow-xs mb-2">
+                              <h3 className="font-extrabold text-sm sm:text-base text-amber-900 dark:text-amber-200 tracking-tight break-keep">
+                                {briefing.title.split('|')[1]?.trim()}
+                              </h3>
+                            </div>
+                          )}
+
                           {sec.items.map((item: NewsItem, itemIdx: number) => {
                             // 💡 마침표(.!?), 쉼표(,) 및 줄바꿈 기준으로 자연스러운 구절 분리 (숫자 쉼표 제외)
                             const sentences = item.text
@@ -774,6 +783,7 @@ export default function BriefingPage() {
                           })}
                         </div>
                       ) : (
+
                         /* 뉴스 / 주식 탭의 기존 컴팩트 리스트 뷰 유지 */
                         <ul className="space-y-3">
                           {sec.items.map((item: NewsItem, itemIdx: number) => (
