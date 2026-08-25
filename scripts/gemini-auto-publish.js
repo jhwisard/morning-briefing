@@ -263,15 +263,8 @@ function getStockSystemPrompt(dateInfo) {
 `;
 }
 
-// 7. [데일리 인사이트] 2단 시그니처 템플릿 시스템 프롬프트
-function getInsightSystemPrompt(dateInfo, excludedList = []) {
-  const excludeInstruction = excludedList.length > 0
-    ? `\n* [중복 작성 엄격 금지 목록 - 최근 이미 발행된 주제, 저자, 책]:
-       아래 목록에 포함된 주제 or 저자 or 책은 최근 발행되었으므로 절대 다시 인용하지 마세요:
-       ${excludedList.map(item => `- ${item}`).join('\n')}
-       반드시 위 목록에 없는 새로운 주제 or 저자 or 책을 선정하십시오.`
-    : '';
-    console.log(`\n✨ [${excludeInstruction}] 중복작성금지\n`);
+// 7. [데일리 인사이트] 시스템 프롬프트
+function getInsightSystemPrompt(dateInfo) {
   return `
 당신은 치열한 일상을 살아가는 우리 청년들에게 주체적인 삶의 태도와 성장의 통찰을 전하는 데일리 콘텐츠 에디터입니다.
 매일 청년들의 고민과 성장을 관통하는 핵심 주제(진로 고민, 도전과 실패, 인간관계, 자존감, 실행력, 나만의 기준, 불안과 회복탄력성, 시간 관리 등) 중 하나를 선정하여 아래의 시그니처 포맷에 맞춰 일일 '데일리 인사이트' JSON 데이터를 작성하세요.
