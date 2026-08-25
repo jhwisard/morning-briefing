@@ -264,9 +264,15 @@ function getStockSystemPrompt(dateInfo) {
 }
 
 // 7. [데일리 인사이트] 2단 시그니처 템플릿 시스템 프롬프트
-function getInsightSystemPrompt(dateInfo) {
+function getInsightSystemPrompt(dateInfo, excludedList = []) {
+  const excludeInstruction = excludedList.length > 0
+    ? `\n* [중복 작성 엄격 금지 목록 - 최근 이미 발행된 주제/인물]:
+       아래 목록에 포함된 저자, 도서, 명언 주제는 최근 발행되었으므로 절대 다시 인용하거나 다루지 마십시오:
+       ${excludedList.map(item => `- ${item}`).join('\n')}
+       반드시 위 목록에 없는 새로운 인물과 주제를 선정하십시오.`
+    : '';
   return `
-당신은 20-30대 청년들에게 주체적인 삶의 태도와 성장의 통찰을 전하는 데일리 콘텐츠 에디터입니다.
+당신은 치열한 일상을 살아가는 우리 청년들에게 주체적인 삶의 태도와 성장의 통찰을 전하는 데일리 콘텐츠 에디터입니다.
 매일 청년들의 고민과 성장을 관통하는 핵심 주제(진로 고민, 도전과 실패, 인간관계, 자존감, 실행력, 나만의 기준, 불안과 회복탄력성, 시간 관리 등) 중 하나를 선정하여 아래의 시그니처 포맷에 맞춰 일일 '데일리 인사이트' JSON 데이터를 작성하세요.
 
 [작성 규칙]
@@ -284,6 +290,28 @@ function getInsightSystemPrompt(dateInfo) {
      * [단어 사용 주의]: '2030', 'MZ' 같은 세대 구분형 단어는 일체 사용하지 말고, '우리 청년들', '우리' 등의 자연스럽고 따뜻한 표현을 사용할 것.
      * 문체 규칙: 반드시 정중하고 단호한 경어체(~합니다, ~입니다)를 엄격히 유지합니다.
      * source: "마인드 피벗"으로 표기합니다.
+
+[출력 포맷 규칙 - 엄격 준수]
+반드시 다른 설명 없이 아래 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요:
+{
+  "title": "데일리 인사이트 | 소제목",
+  "weather": "핵심 통찰 1줄 요약",
+  "highlights": ["실천생각1", "실천생각2", "실천생각3"],
+  "sections": [
+    {
+      "id": "sec_1",
+      "category": "1. 생각의 원점 : 길을 밝히는 한 줄의 지혜",
+      "icon": "Quote",
+      "items": [{ "text": "인용 본문", "source": "저자명, 『도서명』" }]
+    },
+    {
+      "id": "sec_2",
+      "category": "2. 마인드 피벗 : 나만의 기준을 세우는 시간",
+      "icon": "Compass",
+      "items": [{ "text": "해설 본문", "source": "마인드 피벗" }]
+    }
+  ]
+}
 `;
 }
 
@@ -320,17 +348,38 @@ async function publishBriefing(categoryType, targetDateStr) {
   console.log(`🚀 [${dateInfo.isoDate}] ${displayCategory} 생성 및 Supabase 저장 시작`);
   console.log(`========================================`);
 
+  // 💡 최근 발행된 데일리 인사이트 중복 방지용 목록 추출
+  let excludedInsightList = [];
+  if (isInsight) {
+    const { data: recentInsights } = await supabase
+      .from('briefings')
+      .select('title, sections')
+      .eq('category_type', 'insight')
+      .order('briefing_date', { ascending: false })
+      .limit(20); // 최근 20일치 조회
+
+    if (recentInsights && recentInsights.length > 0) {
+      recentInsights.forEach(row => {
+        if (row.title) excludedInsightList.push(`제목/주제: ${row.title}`);
+        if (row.sections && row.sections[0]?.items[0]?.source) {
+          excludedInsightList.push(`저작: ${row.sections[0].items[0].source}`);
+        }
+      });
+    }
+  }
+
+  // 시스템 프롬프트 선택 (인사이트의 경우 제외 목록 전달)
   const systemPrompt = isStock 
-    ? getStockSystemPrompt(dateInfo) 
-    : isInsight
-    ? getInsightSystemPrompt(dateInfo)
+    ? getStockSystemPrompt(dateInfo)
+    : isInsight 
+    ? getInsightSystemPrompt(dateInfo, excludedInsightList)
     : getNewsSystemPrompt(dateInfo);
 
     const userPrompt = isStock
     ? `Google Search를 활용하여 ${dateInfo.isoDate} 기준 가장 최근 마감된 미국 뉴욕증시 3대 지수(다우, S&P500, 나스닥) 및 필라델피아 반도체, 러셀2000, EWY의 '실제 종가와 등락률'을 정확히 확인한 후 [주식 모닝 브리핑] JSON 데이터를 생성하세요. 임의의 수치 생성을 절대 금지합니다.`
     // ? `Google Search를 활용하여 ${dateInfo.isoDate} 기준 가장 최근 마감된 미국 뉴욕증시 3대 지수(다우, S&P500, 나스닥) 및 필라델피아 반도체, 러셀2000, EWY의 '실제 종가와 등락률'을 정확히 확인한 후 [주식 모닝 브리핑] JSON 데이터를 생성하세요. 임의의 수치 생성을 절대 금지합니다.`
     : isInsight
-    ? `20-30대 청년을 위한 깊이 있는 주제를 바탕으로 [생각의 원점] 고전/명저 인용(3~4문장)과 [마인드 피벗] 정중한 경어체(~합니다) 실천 해설(3~4문장)을 담은 [데일리 인사이트] JSON 데이터를 생성하세요.`
+    ? `우리 청년을 위한 깊이 있는 주제를 바탕으로 [생각의 원점] 고전/명저 인용(3~4문장)과 [마인드 피벗] 정중한 경어체(~합니다) 실천 해설(3~4문장)을 담은 [데일리 인사이트] JSON 데이터를 생성하세요.`
     : `Google Search를 활용하여 ${dateInfo.isoDate} 기준 최근 24~48시간 이내의 국내외 8대 분야(미국, 중국/대만, 러·우·중동·북한, 유럽, 일본, 한국 정치사회, 한국 경제, 스포츠) 최신 팩트 뉴스를 검색하세요. 유럽 뉴스는 현지 외신(UK, France, Germany) 팩트를 적극 반영하고, 스포츠는 대상 선수 경기/근황 및 국내 핫이슈로 각 섹션당 정확히 5개 항목을 채워 단일 JSON 블록으로만 응답하세요.`;
   try {
     let config = {
