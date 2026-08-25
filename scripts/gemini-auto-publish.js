@@ -267,9 +267,9 @@ function getStockSystemPrompt(dateInfo) {
 function getInsightSystemPrompt(dateInfo, excludedList = []) {
   const excludeInstruction = excludedList.length > 0
     ? `\n* [중복 작성 엄격 금지 목록 - 최근 이미 발행된 주제, 저자, 책]:
-       아래 목록에 포함된 주제, 저자, 책은 최근 발행되었으므로 절대 다시 인용하지 마세요:
+       아래 목록에 포함된 주제 or 저자 or 책은 최근 발행되었으므로 절대 다시 인용하지 마세요:
        ${excludedList.map(item => `- ${item}`).join('\n')}
-       반드시 위 목록에 없는 새로운 주제, 저자, 책을 선정하십시오.`
+       반드시 위 목록에 없는 새로운 주제 or 저자 or 책을 선정하십시오.`
     : '';
     console.log(`\n✨ [${excludeInstruction}] 중복작성금지\n`);
   return `
