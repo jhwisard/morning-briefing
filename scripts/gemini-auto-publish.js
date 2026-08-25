@@ -380,16 +380,16 @@ async function publishBriefing(categoryType, targetDateStr) {
         // 💡 User Prompt에 금지 목록 직접 주입
         let userPrompt = '';
         if (isStock) {
-        userPrompt = `Google Search를 활용하여 ${dateInfo.isoDate} 기준 가장 최근 마감된 미국 뉴욕증시 3대 지수(다우, S&P500, 나스닥) 및 필라델피아 반도체, 러셀2000, EWY의 '실제 종가와 등락률'을 정확히 확인한 후 [주식 모닝 브리핑] JSON 데이터를 생성하세요. 임의의 수치 생성을 절대 금지합니다.`;
+            userPrompt = `Google Search를 활용하여 ${dateInfo.isoDate} 기준 가장 최근 마감된 미국 뉴욕증시 3대 지수(다우, S&P500, 나스닥) 및 필라델피아 반도체, 러셀2000, EWY의 '실제 종가와 등락률'을 정확히 확인한 후 [주식 모닝 브리핑] JSON 데이터를 생성하세요. 임의의 수치 생성을 절대 금지합니다.`;
         
         } else if (isInsight) {
-        const blacklistText = excludedSources.length > 0
+            const blacklistText = excludedSources.length > 0
             ? `\n\n[절대 금지: 최근 이미 인용된 저자/도서 목록]\n아래 목록의 저자/도서는 절대 인용하지 마십시오:\n${excludedSources.map(s => `- ${s}`).join('\n')}\n반드시 위 목록에 없는 새로운 위인/철학자/문호의 명저를 선택하세요.`
             : '';
-        userPrompt = `우리 청년을 위한 깊이 있는 주제를 바탕으로 [생각의 원점] 고전/명저 인용(3~4문장)과 [마인드 피벗] 정중한 경어체(~합니다) 실천 해설(3~4문장)을 담은 [데일리 인사이트] JSON 데이터를 생성하세요.${blacklistText}`;
-        
+            userPrompt = `우리 청년을 위한 깊이 있는 주제를 바탕으로 [생각의 원점] 고전/명저 인용(3~4문장)과 [마인드 피벗] 정중한 경어체(~합니다) 실천 해설(3~4문장)을 담은 [데일리 인사이트] JSON 데이터를 생성하세요.${blacklistText}`;
+            // console.log(`\n✨ [${blacklistText}]\n`);
         } else {
-        userPrompt = `Google Search를 활용하여 ${dateInfo.isoDate} 기준 최근 24~48시간 이내의 국내외 8대 분야(미국, 중국/대만, 러·우·중동·북한, 유럽, 일본, 한국 정치사회, 한국 경제, 스포츠) 최신 팩트 뉴스를 검색하세요. 유럽 뉴스는 현지 외신(UK, France, Germany) 팩트를 적극 반영하고, 스포츠는 대상 선수 경기/근황 및 국내 핫이슈로 각 섹션당 정확히 5개 항목을 채워 단일 JSON 블록으로만 응답하세요.`;
+            userPrompt = `Google Search를 활용하여 ${dateInfo.isoDate} 기준 최근 24~48시간 이내의 국내외 8대 분야(미국, 중국/대만, 러·우·중동·북한, 유럽, 일본, 한국 정치사회, 한국 경제, 스포츠) 최신 팩트 뉴스를 검색하세요. 유럽 뉴스는 현지 외신(UK, France, Germany) 팩트를 적극 반영하고, 스포츠는 대상 선수 경기/근황 및 국내 핫이슈로 각 섹션당 정확히 5개 항목을 채워 단일 JSON 블록으로만 응답하세요.`;
         }
 
         const response = await ai.models.generateContent({
