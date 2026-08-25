@@ -406,6 +406,12 @@ async function publishBriefing(categoryType, targetDateStr) {
     const parsedData = extractJson(response.text);
 
     console.log(`✅ [${displayCategory}] Gemini 생성 완료: "${parsedData.title}"`);
+    
+    // 💡 데일리 인사이트인 경우 방금 생성된 저자/책 출처 로그 출력
+    if (isInsight && parsedData.sections?.[0]?.items?.[0]?.source) {
+      console.log(`📚 [신규 등록] 저자/책: ${parsedData.sections[0].items[0].source}`);
+    }
+    
     console.log(`📊 생성된 섹션 수: ${parsedData.sections.length}개 / 요약: ${parsedData.highlights.length}개`);
 
     // 기존 당일 동일 카테고리 데이터 삭제 후 신규 등록 (UPSERT)
