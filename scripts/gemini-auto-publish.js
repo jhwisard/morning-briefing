@@ -125,7 +125,10 @@ const NEWS_SECTIONS_CONFIG = [
   },
   {
     id: 'sec_8', category: '[스포츠:이정후.안세영.KLPGA.PBA]', icon: 'Sparkles',
-    searchFocus: '한국 스포츠 야구 골프 배드민턴 뉴스', naverQuery: '이정후 안세영 KLPGA 프로야구 KBO',
+    // 💡 category(저장/표시용 라벨)는 형식을 그대로 유지하되, promptCategory로 Gemini에게 전달되는
+    // "분야" 해석 범위를 넓혀서 지정 선수 소식이 없는 날에도 국내외 스포츠 전반에서 채택할 수 있게 한다.
+    promptCategory: '국내외 주요 스포츠 뉴스 전반 (야구·배드민턴·골프·당구 등 특정 종목에 국한하지 않음, 이정후/안세영/KLPGA/PBA 소식이 있으면 우선)',
+    searchFocus: '한국 스포츠 야구 골프 배드민턴 뉴스', naverQuery: '프로야구 KBO 스포츠',
     feeds: [
       { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' } // 확인 필요
     ]
@@ -441,6 +444,11 @@ const RSS_PARSER = new RssParser({
   }
 });
 
+function truncateSnippet(s, max = 220) {
+  const clean = stripHtmlEntities(s || '');
+  return clean.length > max ? clean.slice(0, max) + '…' : clean;
+}
+
 async function fetchRssCandidates(feed) {
   try {
     const parsed = await RSS_PARSER.parseURL(feed.url);
@@ -449,6 +457,8 @@ async function fetchRssCandidates(feed) {
       return {
         source: feed.name,
         title: (item.title || '').trim(),
+        // contentSnippet(rss-parser가 HTML을 벗겨낸 순수 텍스트)을 우선 사용, 없으면 summary/content로 대체
+        snippet: truncateSnippet(item.contentSnippet || item.summary || item.content || ''),
         link: item.link,
         pubDate: item.isoDate || item.pubDate || null,
         pubMs
@@ -484,6 +494,7 @@ async function fetchNaverNewsCandidates(query) {
       return {
         source: outletNameForDomain(domain) || domain || '네이버뉴스',
         title: stripHtmlEntities(it.title),
+        snippet: truncateSnippet(it.description || ''),
         link,
         pubDate: it.pubDate || null,
         pubMs
@@ -513,6 +524,7 @@ async function fetchSerpApiCandidates(query) {
       return {
         source: it.source?.name || outletNameForDomain(domain) || domain || 'SerpAPI',
         title: it.title,
+        snippet: truncateSnippet(it.snippet || ''),
         link,
         pubDate: it.date || null,
         pubMs
@@ -658,23 +670,27 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
   }
 
   const candidateListText = candidates
-    .map((c, i) => `${i}. [${c.source}] ${c.title} (${c.pubDate || '시각 미상'})`)
+    .map((c, i) => {
+      const snippetPart = c.snippet ? ` — ${c.snippet}` : '';
+      return `${i}. [${c.source}] ${c.title}${snippetPart} (${c.pubDate || '시각 미상'})`;
+    })
     .join('\n');
 
   const prompt = `
 당신은 아래 "실제로 수집된 후보 기사 목록"에서만 골라 뉴스를 정리하는 에디터입니다.
 이 목록은 RSS/뉴스 API로 이미 실제 존재가 확인된 기사들이며, 목록에 없는 사실을 추가하거나 지어내는 것은 절대 금지합니다.
+각 줄은 "제목 — 기사 요약(스니펫)" 형식이며, 스니펫이 있는 항목은 제목뿐 아니라 스니펫에 담긴 사실도 요약에 활용해 더 구체적으로 작성하십시오.
 
-[분야]: ${secConfig.category}
+[분야]: ${secConfig.promptCategory || secConfig.category}
 [오늘 날짜(KST)]: ${dateInfo.isoDate}
 
-[후보 기사 목록] (번호. [언론사] 제목 (게재시각))
+[후보 기사 목록] (번호. [언론사] 제목 — 스니펫 (게재시각))
 ${candidateListText}
 
 [작업 지시]
-1. 위 목록 중 "${secConfig.category}" 분야에서 가장 중요하고 대표성 있는 기사를 최대 5개 선택하십시오. 관련성 높은 기사가 5개 미만이면 억지로 채우지 말고 있는 만큼만 선택하십시오.
-2. 각 기사를 한국어 한 문장으로 요약하되, 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성하십시오 (~함, ~임 종결 금지).
-3. 목록에 있는 제목이 전달하는 사실 범위를 벗어나는 내용(원인 추정, 배경 설명 등)을 덧붙이지 마십시오.
+1. 위 목록 중 "${secConfig.promptCategory || secConfig.category}" 분야에서 가장 중요하고 대표성 있는 기사를 최대 5개 선택하십시오. 관련성 높은 기사가 5개 미만이면 억지로 채우지 말고 있는 만큼만 선택하십시오.
+2. 각 기사를 한국어 한 문장으로 요약하되, 제목과 스니펫에 담긴 구체적 사실(수치, 인물, 기관명, 경위 등)을 최대한 반영해 정보량 있게 작성하십시오. 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성하십시오 (~함, ~임 종결 금지).
+3. 목록(제목+스니펫)이 전달하는 사실 범위를 벗어나는 내용(목록에 없는 원인 추정, 배경 설명 등)을 절대 덧붙이지 마십시오. 정보가 부족하면 짧게, 풍부하면 풍부한 만큼만 쓰십시오.
 4. source나 url은 적지 마십시오 — 이미 후보 목록에서 확정되어 있으므로 선택한 기사의 번호(index)만 알려주면 됩니다.
 
 반드시 아래 JSON 형식으로만 응답하세요:
@@ -1022,6 +1038,9 @@ async function main() {
       await publishBriefing('insight', targetDateStr);
     }
     console.log(`\n✨ [${targetDateStr || '오늘'}] 모든 브리핑 자동 발행 작업이 완료되었습니다.\n`);
+    // 💡 RSS/네이버API/Yahoo Finance 등에서 열린 keep-alive 커넥션이 남아있으면
+    // 이벤트 루프가 안 비워져서 셸 프롬프트로 안 돌아오는 경우가 있어 명시적으로 종료한다.
+    process.exit(0);
   } catch (e) {
     console.error('\n💥 프로세스 실행 중단:', e.message);
     process.exit(1);
