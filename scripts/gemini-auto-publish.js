@@ -168,9 +168,9 @@ function extractJson(rawText) {
   }
 }
 
-// 5. Yahoo 공식 REST API 기반 7대 주요 지표 실제 시세 수집 함수
+// 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
 async function fetchMarketData(dateInfo) {
-  console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 수집 중...`);
+  console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 및 등락률 수집 중...`);
 
   const tickers = {
     dow: '^DJI',
@@ -186,7 +186,8 @@ async function fetchMarketData(dateInfo) {
 
   for (const [key, symbol] of Object.entries(tickers)) {
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
+      // 5일치 일봉 데이터를 가져와 직전 2거래일 종가 추출
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
       const res = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -195,16 +196,29 @@ async function fetchMarketData(dateInfo) {
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const meta = json?.chart?.result?.[0]?.meta;
+      const result = json?.chart?.result?.[0];
+      const meta = result?.meta;
+      const closes = result?.indicators?.quote?.[0]?.close?.filter(c => c !== null && c !== undefined) || [];
 
-      const price = meta?.regularMarketPrice ?? 0;
-      const prevClose = meta?.chartPreviousClose ?? meta?.previousClose ?? price;
-      const changePercent = prevClose !== 0 ? ((price - prevClose) / prevClose) * 100 : 0;
+      let currentPrice = meta?.regularMarketPrice;
+      let prevClose = meta?.previousClose;
+
+      // 일봉 배열에서 가장 최근 2개 종가로 전일 종가 정밀 보정
+      if (closes.length >= 2) {
+        currentPrice = currentPrice || closes[closes.length - 1];
+        prevClose = closes[closes.length - 2];
+      } else if (!prevClose && closes.length === 1) {
+        prevClose = closes[0];
+      }
+
+      const changePercent = (prevClose && prevClose !== 0)
+        ? ((currentPrice - prevClose) / prevClose) * 100
+        : 0;
 
       const sign = changePercent > 0 ? '+' : '';
-      const formattedPrice = price >= 100 
-        ? price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
-        : price.toFixed(2);
+      const formattedPrice = currentPrice >= 100 
+        ? currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
+        : currentPrice.toFixed(2);
       const formattedChange = `${sign}${changePercent.toFixed(2)}%`;
 
       results[key] = {
