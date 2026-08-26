@@ -1,13 +1,10 @@
 /**
  * scripts/gemini-auto-publish.js
- *
+ * 
  * 1. 간추린 뉴스: 8대 분야 청크 병렬 검색 (실시간 팩트 기사 수집)
- *    - Google Search grounding 메타데이터와 대조해 실제 검색되지 않은 URL/기사는 제외
- *    - 신뢰 언론사 화이트리스트(약 100곳) 도메인과 source 표기가 일치하는지 검증
- *    - 게재 후 48시간 이내 기사만 채택 (개수 미달 시 억지로 채우지 않음)
  * 2. 주식 모닝 브리핑: yahoo-finance2 실시간 지수 수치 확정 주입 + Gemini 시황/전략 분석
  * 3. 데일리 인사이트: 최근 30일 중복 검증 & 자동 재시도(Retry) 파이프라인
- *
+ * 
  * 실행 옵션:
  *   node scripts/gemini-auto-publish.js stock    # 주식 모닝 브리핑
  *   node scripts/gemini-auto-publish.js news     # 간추린 뉴스
@@ -21,12 +18,16 @@ loadEnvConfig(process.cwd());
 const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
 
+// 💡 yahoo-finance2 CJS 안전 로더
+// const yfModule = require('yahoo-finance2');
+// const yahooFinance = yfModule.default || yfModule;
+
 // 1. 환경 변수 검증
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
 let rawUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
 const SUPABASE_SERVICE_ROLE_KEY = (
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
   process.env.SUPABASE_KEY || ''
 ).trim().replace(/^["']|["']$/g, '');
 
@@ -58,151 +59,6 @@ const NEWS_SECTIONS_CONFIG = [
   { id: 'sec_7', category: '[한국.경제]', icon: 'TrendingUp', searchFocus: '오늘 한국 경제 금융 부동산 증시 기업 실적 주요 경제 뉴스' },
   { id: 'sec_8', category: '[스포츠:이정후.안세영.KLPGA.PBA]', icon: 'Sparkles', searchFocus: '오늘 스포츠 주요 뉴스 이정후 MLB 안세영 골프 PBA 당구 손흥민 프로야구 KBO' }
 ];
-
-// 💡 신뢰 언론사 화이트리스트 (약 100개) — source 표기와 실제 도메인 대조용
-// key: Gemini가 응답에 적을 것으로 기대하는 언론사 표기, value: 해당 언론사의 실제 도메인(들)
-const TRUSTED_DOMAINS = {
-  // ── 한국 통신/방송/종합일간지 ──
-  '연합뉴스': ['yna.co.kr'],
-  '연합뉴스TV': ['yonhapnewstv.co.kr'],
-  '뉴시스': ['newsis.com'],
-  '뉴스1': ['news1.kr'],
-  '조선일보': ['chosun.com'],
-  '중앙일보': ['joongang.co.kr', 'joins.com'],
-  '동아일보': ['donga.com'],
-  '한국일보': ['hankookilbo.com'],
-  '경향신문': ['khan.co.kr'],
-  '한겨레': ['hani.co.kr'],
-  '서울신문': ['seoul.co.kr'],
-  '국민일보': ['kmib.co.kr'],
-  '문화일보': ['munhwa.com'],
-  '세계일보': ['segye.com'],
-  '내일신문': ['naeil.com'],
-  'KBS': ['news.kbs.co.kr', 'kbs.co.kr'],
-  'MBC': ['imnews.imbc.com', 'imbc.com'],
-  'SBS': ['news.sbs.co.kr'],
-  'JTBC': ['news.jtbc.co.kr'],
-  'TV조선': ['tvchosun.com'],
-  '채널A': ['ichannela.com', 'news.ichannela.com'],
-  'MBN': ['mbn.co.kr'],
-  'YTN': ['ytn.co.kr'],
-  '노컷뉴스': ['nocutnews.co.kr'],
-  '프레시안': ['pressian.com'],
-  '오마이뉴스': ['ohmynews.com'],
-  '데일리안': ['dailian.co.kr'],
-  '뉴데일리': ['newdaily.co.kr'],
-  '아이뉴스24': ['inews24.com'],
-  '메트로신문': ['metroseoul.co.kr'],
-  '공정뉴스': ['fairnews.co.kr'],
-
-  // ── 경제/증권 매체 ──
-  '매일경제': ['mk.co.kr'],
-  '한국경제': ['hankyung.com', 'wowtv.co.kr'],
-  '헤럴드경제': ['heraldcorp.com'],
-  '이데일리': ['edaily.co.kr'],
-  '머니투데이': ['mt.co.kr'],
-  '아시아경제': ['asiae.co.kr'],
-  '파이낸셜뉴스': ['fnnews.com'],
-  '뉴스핌': ['newspim.com'],
-  '이투데이': ['etoday.co.kr'],
-  '전자신문': ['etnews.com'],
-  'ZDNet Korea': ['zdnet.co.kr'],
-  '디지털타임스': ['dt.co.kr'],
-  '블로터': ['bloter.net'],
-  '디일렉': ['thelec.kr'],
-  'AI타임스': ['aitimes.com'],
-  '글로벌이코노믹': ['g-enews.com'],
-  '조세일보': ['joseilbo.com'],
-  '연합인포맥스': ['yonhapinfomax.co.kr'],
-  '자본시장뉴스': ['capitalmarket.co.kr'],
-  '알파경제': ['alphabiz.co.kr'],
-  '경기일보': ['kyeonggi.com'],
-  '강원일보': ['kwnews.co.kr'],
-  '부산일보': ['busan.com'],
-  '매일신문': ['imaeil.com'],
-  '영남일보': ['yeongnam.com'],
-  '광주일보': ['kwangju.co.kr'],
-  '충청투데이': ['cctoday.co.kr'],
-  '대전일보': ['daejonilbo.com'],
-  '이코노미스트(한국)': ['economist.co.kr'],
-  '한국금융경제신문': ['kfenews.com'],
-
-  // ── 스포츠/연예 매체 ──
-  '스포츠서울': ['sportsseoul.com'],
-  '스타뉴스': ['starnewskorea.com'],
-  '엑스포츠뉴스': ['xportsnews.com'],
-  '일간스포츠': ['isplus.com'],
-  'OSEN': ['osen.co.kr'],
-  '스포츠조선': ['sportschosun.com'],
-  '마이데일리': ['mydaily.co.kr'],
-
-  // ── 미국 ──
-  '로이터': ['reuters.com'],
-  '블룸버그': ['bloomberg.com'],
-  'AP': ['apnews.com'],
-  'AFP': ['afp.com'],
-  'CNN': ['cnn.com'],
-  'NYT': ['nytimes.com'],
-  '뉴욕타임스': ['nytimes.com'],
-  'WSJ': ['wsj.com'],
-  '월스트리트저널': ['wsj.com'],
-  '워싱턴포스트': ['washingtonpost.com'],
-  'NPR': ['npr.org'],
-  'ABC뉴스': ['abcnews.go.com'],
-  'NBC뉴스': ['nbcnews.com'],
-  'CBS뉴스': ['cbsnews.com'],
-  '폭스뉴스': ['foxnews.com'],
-  '폴리티코': ['politico.com'],
-  '액시오스': ['axios.com'],
-  'USA투데이': ['usatoday.com'],
-  'LA타임스': ['latimes.com'],
-  '타임': ['time.com'],
-  '뉴스위크': ['newsweek.com'],
-  '포브스': ['forbes.com'],
-  '비즈니스인사이더': ['businessinsider.com'],
-  'CNBC': ['cnbc.com'],
-  '마켓워치': ['marketwatch.com'],
-  '야후뉴스': ['news.yahoo.com', 'finance.yahoo.com'],
-  '테크크런치': ['techcrunch.com'],
-  '더버지': ['theverge.com'],
-  '와이어드': ['wired.com'],
-
-  // ── 유럽 ──
-  'BBC': ['bbc.com', 'bbc.co.uk'],
-  '가디언': ['theguardian.com'],
-  '파이낸셜타임스': ['ft.com'],
-  '이코노미스트': ['economist.com'],
-  '스카이뉴스': ['news.sky.com'],
-  'ITV뉴스': ['itv.com'],
-  '도이체벨레': ['dw.com'],
-  '슈피겔': ['spiegel.de'],
-  '르몽드': ['lemonde.fr'],
-  '타스': ['tass.com'],
-  '리아노보스티': ['ria.ru'],
-  '인테르팍스': ['interfax.com', 'interfax.ru'],
-
-  // ── 일본 ──
-  '니혼게이자이': ['nikkei.com'],
-  '아사히신문': ['asahi.com'],
-  '요미우리신문': ['yomiuri.co.jp'],
-  '마이니치신문': ['mainichi.jp'],
-  '교도통신': ['kyodonews.net'],
-  'NHK': ['nhk.or.jp'],
-  '재팬타임스': ['japantimes.co.jp'],
-  '퍼시픽 리그.com': ['pacificleague.com'],
-
-  // ── 중국/대만/중동 ──
-  '신화통신': ['xinhuanet.com', 'news.cn'],
-  '인민일보': ['people.com.cn'],
-  '글로벌타임스': ['globaltimes.cn'],
-  'CCTV': ['cctv.com'],
-  'SCMP': ['scmp.com'],
-  '타이베이타임스': ['taipeitimes.com'],
-  '중앙통신사(대만)': ['focustaiwan.tw'],
-  '알자지라': ['aljazeera.com'],
-  '타임스오브이스라엘': ['timesofisrael.com'],
-  '하레츠': ['haaretz.com']
-};
 
 // 3. 한국 표준시(KST) 날짜 계산
 function getKSTDateInfo(targetDateStr) {
@@ -312,60 +168,6 @@ function extractJson(rawText) {
   }
 }
 
-// 💡 URL에서 도메인만 추출 (www. 접두어 제거)
-function getDomain(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-// 💡 Gemini 응답에서 실제로 Google Search가 근거로 잡은 URL(그라운딩 청크)만 추출
-// -> 모델이 "말한" URL이 아니라, 실제로 검색되어 사용된 URL 목록이라 신뢰 가능
-function extractGroundedDomains(response) {
-  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  return chunks
-    .map(c => c?.web?.uri)
-    .filter(Boolean)
-    .map(getDomain)
-    .filter(Boolean);
-}
-
-// 💡 뉴스 항목 검증: (1) url이 실제 grounding 결과에 존재하는가 (2) source-도메인이 화이트리스트와 일치하는가
-function validateNewsItem(item, groundedDomains) {
-  if (!item?.text || !item?.source || !item?.url) {
-    return { ok: false, reason: 'missing_field' };
-  }
-
-  const itemDomain = getDomain(item.url);
-  if (!itemDomain) {
-    return { ok: false, reason: 'invalid_url' };
-  }
-
-  // (1) 모델이 제시한 URL의 도메인이, 실제 Google Search grounding 결과 도메인 목록에 존재하는가
-  const isGrounded = groundedDomains.some(
-    d => d === itemDomain || itemDomain.endsWith(`.${d}`) || d.endsWith(`.${itemDomain}`)
-  );
-  if (!isGrounded) {
-    return { ok: false, reason: 'not_in_grounding' };
-  }
-
-  // (2) source(언론사 표기)가 화이트리스트에 있고, 그 도메인과 실제 url 도메인이 일치하는가
-  const allowedDomains = TRUSTED_DOMAINS[item.source];
-  if (!allowedDomains) {
-    return { ok: false, reason: 'unknown_outlet' };
-  }
-  const domainMatches = allowedDomains.some(
-    d => itemDomain === d || itemDomain.endsWith(`.${d}`)
-  );
-  if (!domainMatches) {
-    return { ok: false, reason: 'source_domain_mismatch' };
-  }
-
-  return { ok: true };
-}
-
 // 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
 async function fetchMarketData(dateInfo) {
   console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 및 등락률 수집 중...`);
@@ -384,6 +186,7 @@ async function fetchMarketData(dateInfo) {
 
   for (const [key, symbol] of Object.entries(tickers)) {
     try {
+      // 5일치 일봉 데이터를 가져와 직전 2거래일 종가 추출
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
       const res = await fetch(url, {
         headers: {
@@ -400,6 +203,7 @@ async function fetchMarketData(dateInfo) {
       let currentPrice = meta?.regularMarketPrice;
       let prevClose = meta?.previousClose;
 
+      // 일봉 배열에서 가장 최근 2개 종가로 전일 종가 정밀 보정
       if (closes.length >= 2) {
         currentPrice = currentPrice || closes[closes.length - 1];
         prevClose = closes[closes.length - 2];
@@ -412,8 +216,8 @@ async function fetchMarketData(dateInfo) {
         : 0;
 
       const sign = changePercent > 0 ? '+' : '';
-      const formattedPrice = currentPrice >= 100
-        ? currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      const formattedPrice = currentPrice >= 100 
+        ? currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
         : currentPrice.toFixed(2);
       const formattedChange = `${sign}${changePercent.toFixed(2)}%`;
 
@@ -434,43 +238,33 @@ async function fetchMarketData(dateInfo) {
   return results;
 }
 
-// 6. [간추린 뉴스] 단일 섹션 팩트 검색 (그라운딩 검증 포함)
+// 6. [간추린 뉴스] 단일 섹션 팩트 검색
 async function generateSingleNewsSection(secConfig, dateInfo) {
-  const now = new Date();
-  const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-  const kstFormatter = new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short'
-  });
-
   const prompt = `
-당신은 사실(Fact) 검증을 최우선으로 하는 전문 뉴스 에디터입니다. 반드시 Google Search 도구로 실제 검색되는 기사만 근거로 삼으십시오. 절대 기억이나 추정으로 기사를 지어내지 마십시오.
-
-[시간 제약 - 엄격 준수]
-- 현재 기준 시각: ${kstFormatter.format(now)} (KST)
-- 채택 가능 기사 게재 시각: ${kstFormatter.format(cutoff)} 이후 (최근 48시간 이내)
-- 검색 결과에서 게재 시각을 확인할 수 없는 기사는 사용하지 마십시오.
-- 48시간보다 오래된 기사이거나, 검증되지 않는 내용은 절대 포함하지 마십시오.
-- 검증 가능한 기사가 5개 미만이면 억지로 5개를 채우지 말고, 확보된 개수만 반환하십시오. 개수를 채우기 위한 추측·각색·재구성은 금지합니다.
+당신은 오늘(${dateInfo.isoDate}) 보도된 사실(Fact) 기사만을 정밀하게 정리하는 전문 뉴스 에디터입니다.
+Google Search를 사용하여 아래 지정된 분야의 최신 실제 기사를 검색하고, 정확히 5개의 팩트 뉴스 항목을 생성하세요.
 
 [검색 타깃 분야]: ${secConfig.category}
 [검색 키워드 힌트]: "${secConfig.searchFocus}", "${dateInfo.isoDate}"
 
-[항목별 필수 필드 - 4개 모두 필수]
-1. text: 팩트 뉴스 요약 문장. 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성 (~함, ~임 종결 금지)
-2. source: 실제 언론사명 (검색 결과에 표기된 것 그대로)
-3. url: 검색 결과에 실제로 나타난 해당 기사의 정확한 URL (임의 생성 절대 금지 — 검색되지 않았다면 이 항목 자체를 제외할 것)
-4. published_at: 검색 결과에서 확인한 게재 일시 (모르면 이 항목을 제외할 것)
+[엄격 규칙 - 가상 뉴스 절대 금지]
+1. 오늘(${dateInfo.isoDate}) 또는 어제 실제 언론사에 보도된 팩트 기사만 작성할 것. 가공의 사실 생성을 절대 금지함.
+2. 스포츠 섹션의 경우 지정 선수의 당일 경기 소식이 없으면 프로야구(KBO), 프리미어리그(EPL), 국내 골프 등 오늘자 가장 뜨거운 스포츠 팩트 기사로 대체할 것.
+3. 각 문장은 반드시 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성할 것 (~함, ~임 종결 금지).
+4. source에는 실제 출처 언론사명("로이터", "연합뉴스", "조선일보", "블룸버그", "BBC" 등)을 기재할 것.
 
-[스포츠 섹션 예외]: 지정 선수의 당일 경기 소식이 없으면 KBO, EPL, 국내 골프 등 오늘자 가장 뜨거운 스포츠 팩트 기사로 대체하되, 위 시간/검증 제약은 동일하게 적용할 것.
-
-반드시 아래 JSON 형식으로만 응답하세요 (다른 설명 금지):
+반드시 아래 JSON 형식으로만 응답하세요:
 \`\`\`json
 {
   "id": "${secConfig.id}",
   "category": "${secConfig.category}",
   "icon": "${secConfig.icon}",
   "items": [
-    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명", "url": "실제 기사 URL", "published_at": "게재 일시" }
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" },
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" },
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" },
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" },
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" }
   ]
 }
 \`\`\``;
@@ -484,33 +278,7 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
     }
   });
 
-  const parsed = extractJson(response.text);
-  const groundedDomains = extractGroundedDomains(response);
-
-  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
-  const checked = rawItems.map(item => ({ item, result: validateNewsItem(item, groundedDomains) }));
-  const accepted = checked.filter(c => c.result.ok).map(c => c.item);
-  const rejected = checked.filter(c => !c.result.ok);
-
-  if (rejected.length > 0) {
-    console.warn(`  ⚠️ [${secConfig.category}] ${rejected.length}건 검증 실패로 제외:`);
-    rejected.forEach(r => {
-      const preview = (r.item?.text || '(텍스트 없음)').slice(0, 40);
-      console.warn(`     - "${preview}..." → 사유: ${r.result.reason}`);
-    });
-  }
-
-  if (accepted.length === 0) {
-    console.warn(`  ⚠️ [${secConfig.category}] 검증을 통과한 기사가 0건입니다. 이번 회차는 해당 섹션이 빈 상태로 발행됩니다.`);
-  }
-
-  return {
-    id: parsed.id || secConfig.id,
-    category: parsed.category || secConfig.category,
-    icon: parsed.icon || secConfig.icon,
-    // 최종 저장 포맷은 기존과 동일하게 text/source만 유지 (url/published_at은 검증용으로만 사용)
-    items: accepted.map(({ text, source }) => ({ text, source }))
-  };
+  return extractJson(response.text);
 }
 
 // 7. [간추린 뉴스] 날씨 및 메타 요약
@@ -521,14 +289,14 @@ async function generateNewsMeta(dateInfo, sections) {
     .join('\n');
 
   const prompt = `
-오늘(${dateInfo.isoDate}) 대한민국 전국 날씨를 Google Search로 검색하고, 아래 수집된(이미 검증된) 오늘자 주요 뉴스 헤드라인을 바탕으로 [간추린 뉴스]의 날씨와 3줄 하이라이트를 작성하세요. 아래 목록에 없는 새로운 사실을 지어내지 말고, 반드시 주어진 헤드라인 범위 내에서만 하이라이트를 구성하세요.
+오늘(${dateInfo.isoDate}) 대한민국 전국 날씨를 Google Search로 검색하고, 아래 수집된 오늘자 주요 뉴스 헤드라인을 바탕으로 [간추린 뉴스]의 날씨와 3줄 하이라이트를 작성하세요.
 
 [오늘자 수집된 주요 뉴스 샘플]:
 ${sampleHeadlines}
 
 [작성 규칙]:
 1. weather: 오늘 전국 날씨/기온 한 줄 요약 (명사형 종결)
-2. highlights: 위 목록 중 가장 주목할 톱 헤드라인 3개 (각 1문장, 명사형 종결, 목록에 있는 사실만 사용)
+2. highlights: 오늘 아침 가장 주목할 톱 헤드라인 3개 (각 1문장, 명사형 종결)
 
 반드시 아래 JSON 형식으로만 응답하세요:
 \`\`\`json
@@ -663,24 +431,21 @@ async function publishBriefing(categoryType, targetDateStr) {
   try {
     let parsedData = null;
 
-    // 💡 A. [간추린 뉴스] 청크 분할 병렬 검색 (4개씩 2묶음) + 그라운딩 검증
+    // 💡 A. [간추린 뉴스] 청크 분할 병렬 검색 (4개씩 2묶음)
     if (isNews) {
-      console.log(`🔍 8대 분야 개별 Google Search 병렬 검색 가동 중... (48시간 이내 검증된 기사만 채택)`);
+      console.log(`🔍 8대 분야 개별 Google Search 병렬 검색 가동 중...`);
       const chunk1 = NEWS_SECTIONS_CONFIG.slice(0, 4);
       const chunk2 = NEWS_SECTIONS_CONFIG.slice(4, 8);
 
       const runSection = async (cfg) => {
         const res = await generateSingleNewsSection(cfg, dateInfo);
-        console.log(`  ✓ [완료] ${cfg.category} (검증 통과 ${res.items.length}건)`);
+        console.log(`  ✓ [완료] ${cfg.category} (${res.items.length}개 팩트 확보)`);
         return res;
       };
 
       const res1 = await Promise.all(chunk1.map(runSection));
       const res2 = await Promise.all(chunk2.map(runSection));
       const generatedSections = [...res1, ...res2];
-
-      const totalItems = generatedSections.reduce((sum, s) => sum + s.items.length, 0);
-      console.log(`📊 전체 검증 통과 기사 수: ${totalItems}건`);
 
       console.log(`🌤️ 전국 날씨 및 3대 핵심 하이라이트 요약 중...`);
       const metaData = await generateNewsMeta(dateInfo, generatedSections);
@@ -691,7 +456,7 @@ async function publishBriefing(categoryType, targetDateStr) {
         highlights: metaData.highlights,
         sections: generatedSections
       };
-    }
+    } 
     // 💡 B. [주식 모닝 브리핑] Yahoo Finance 실시간 수치 확정 + 시황 분석
     else if (isStock) {
       const marketData = await fetchMarketData(dateInfo);
@@ -751,18 +516,14 @@ async function publishBriefing(categoryType, targetDateStr) {
         const generatedSource = parsedData.sections?.[0]?.items?.[0]?.source || '';
         const authorMatch = generatedSource.split(',')[0].trim();
 
-        const isDuplicate = excludedSources.some(ex =>
+        const isDuplicate = excludedSources.some(ex => 
           (authorMatch && ex.includes(authorMatch)) || ex.includes(generatedSource)
         );
 
-        if (isDuplicate) {
-          if (attempt < MAX_RETRIES) {
-            console.warn(`⚠️ [중복 감지 (시도 ${attempt}/${MAX_RETRIES})]: "${generatedSource}" 재생성합니다.`);
-            excludedSources.push(generatedSource);
-            continue;
-          } else {
-            console.warn(`⚠️ [중복 감지 (최종 시도 ${attempt}/${MAX_RETRIES})]: "${generatedSource}"를 재시도 없이 그대로 발행합니다.`);
-          }
+        if (isDuplicate && attempt < MAX_RETRIES) {
+          console.warn(`⚠️ [중복 감지 (시도 ${attempt}/${MAX_RETRIES})]: "${generatedSource}" 재생성합니다.`);
+          excludedSources.push(generatedSource);
+          continue;
         }
         break;
       }
