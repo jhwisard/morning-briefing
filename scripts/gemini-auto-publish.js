@@ -19,8 +19,8 @@ const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
 
 // 💡 yahoo-finance2 CJS 안전 로더
-const yfModule = require('yahoo-finance2');
-const yahooFinance = yfModule.default || yfModule;
+// const yfModule = require('yahoo-finance2');
+// const yahooFinance = yfModule.default || yfModule;
 
 // 1. 환경 변수 검증
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
@@ -168,27 +168,38 @@ function extractJson(rawText) {
   }
 }
 
-// 💡 5. Yahoo Finance 기반 7대 주요 지수 실제 시세 수집 함수
+// 5. Yahoo 공식 REST API 기반 7대 주요 지표 실제 시세 수집 함수
 async function fetchMarketData(dateInfo) {
   console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 수집 중...`);
 
   const tickers = {
-    dow: '^DJI',        // 다우존스 30
-    sp500: '^GSPC',     // S&P 500
-    nasdaq: '^IXIC',    // 나스닥 종합
-    russell: '^RUT',    // 러셀 2000
-    sox: '^SOX',        // 필라델피아 반도체
-    ewy: 'EWY',         // MSCI South Korea ETF
-    usdkrw: 'KRW=X'     // 원/달러 환율
+    dow: '^DJI',
+    sp500: '^GSPC',
+    nasdaq: '^IXIC',
+    russell: '^RUT',
+    sox: '^SOX',
+    ewy: 'EWY',
+    usdkrw: 'KRW=X'
   };
 
   const results = {};
 
   for (const [key, symbol] of Object.entries(tickers)) {
     try {
-      const quote = await yahooFinance.quote(symbol);
-      const price = quote?.regularMarketPrice ?? quote?.regularMarketPreviousClose ?? 0;
-      const changePercent = quote?.regularMarketChangePercent ?? 0;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+
+      const price = meta?.regularMarketPrice ?? 0;
+      const prevClose = meta?.chartPreviousClose ?? meta?.previousClose ?? price;
+      const changePercent = prevClose !== 0 ? ((price - prevClose) / prevClose) * 100 : 0;
 
       const sign = changePercent > 0 ? '+' : '';
       const formattedPrice = price >= 100 
@@ -199,13 +210,11 @@ async function fetchMarketData(dateInfo) {
       results[key] = {
         symbol,
         price: formattedPrice,
-        change: formattedChange,
-        rawPrice: price,
-        rawChange: changePercent
+        change: formattedChange
       };
     } catch (err) {
-      console.warn(`  ⚠️ [Yahoo Finance] ${symbol} 조회 실패, 기본값 대체`);
-      results[key] = { symbol, price: '조회중', change: '0.00%', rawPrice: 0, rawChange: 0 };
+      console.warn(`  ⚠️ [Yahoo Finance] ${symbol} 조회 실패 (${err.message})`);
+      results[key] = { symbol, price: '조회중', change: '0.00%' };
     }
   }
 
