@@ -321,45 +321,111 @@ function getDomain(url) {
   }
 }
 
-// 💡 Gemini 응답에서 실제로 Google Search가 근거로 잡은 URL(그라운딩 청크)만 추출
-// -> 모델이 "말한" URL이 아니라, 실제로 검색되어 사용된 URL 목록이라 신뢰 가능
-function extractGroundedDomains(response) {
-  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  return chunks
-    .map(c => c?.web?.uri)
-    .filter(Boolean)
-    .map(getDomain)
-    .filter(Boolean);
+// 💡 [중요] Gemini googleSearch grounding의 groundingChunks[].web.uri는 실제 기사 URL이 아니라
+// 구글 자체의 리다이렉트 프록시 링크(예: vertexaisearch.cloud.google.com/grounding-api-redirect/...)입니다.
+// 그래서 이 링크의 "도메인"을 직접 화이트리스트와 비교하면 절대 매칭될 수 없습니다.
+// 실제 도메인을 알려면 이 리다이렉트를 서버에서 직접 따라가(fetch) 최종 URL을 확인해야 합니다.
+const REDIRECT_DOMAIN_CACHE = new Map();
+
+async function resolveRedirectDomain(uri) {
+  if (!uri) return null;
+  if (REDIRECT_DOMAIN_CACHE.has(uri)) return REDIRECT_DOMAIN_CACHE.get(uri);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  };
+
+  try {
+    let res;
+    try {
+      res = await fetch(uri, { method: 'HEAD', redirect: 'follow', signal: controller.signal, headers });
+    } catch {
+      // 일부 서버는 HEAD를 거부하므로 GET으로 재시도
+      res = await fetch(uri, { method: 'GET', redirect: 'follow', signal: controller.signal, headers });
+    }
+    const finalDomain = getDomain(res.url) || getDomain(uri);
+    REDIRECT_DOMAIN_CACHE.set(uri, finalDomain);
+    return finalDomain;
+  } catch (err) {
+    REDIRECT_DOMAIN_CACHE.set(uri, null);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
-// 💡 뉴스 항목 검증: (1) url이 실제 grounding 결과에 존재하는가 (2) source-도메인이 화이트리스트와 일치하는가
-function validateNewsItem(item, groundedDomains) {
-  if (!item?.text || !item?.source || !item?.url) {
+// 💡 응답에 포함된 모든 grounding 청크의 리다이렉트를 실제 도메인으로 해석 (인덱스 순서 그대로 유지)
+async function resolveGroundingChunkDomains(response) {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  return Promise.all(chunks.map(c => resolveRedirectDomain(c?.web?.uri)));
+}
+
+// 💡 원문 텍스트(response.text, 즉 JSON 원본 문자열) 안에서 item.text가 실제로 위치한 구간을 찾는다.
+// JSON.parse된 값과 원본 문자열의 이스케이프 방식이 다를 수 있어 두 가지 방식으로 시도한다.
+function locateSegment(rawText, value) {
+  if (!rawText || !value) return null;
+  let idx = rawText.indexOf(value);
+  if (idx !== -1) return { start: idx, end: idx + value.length };
+
+  const escaped = JSON.stringify(value).slice(1, -1);
+  idx = rawText.indexOf(escaped);
+  if (idx !== -1) return { start: idx, end: idx + escaped.length };
+
+  return null;
+}
+
+// 💡 특정 문장(item.text)을 실제로 뒷받침하는 grounding 청크의 (해석된) 도메인 목록을 구한다.
+// groundingSupports는 "이 문장 구간은 이 청크(들)에서 근거했다"는 매핑 정보를 제공한다 (문장 단위 인용 근거).
+function getSupportingDomains(response, resolvedChunkDomains, text) {
+  const supports = response?.candidates?.[0]?.groundingMetadata?.groundingSupports;
+
+  // groundingSupports 자체가 없는 응답이면(모델/버전에 따라 생략될 수 있음) 문장 단위 매칭이 불가능하므로
+  // 이 섹션 응답 전체에서 실제로 검색된 도메인 목록으로 완화해서 검증한다 (그래도 "실제 검색되지 않은 도메인"은 여전히 걸러진다).
+  if (!Array.isArray(supports) || supports.length === 0) {
+    return { domains: resolvedChunkDomains.filter(Boolean), precise: false };
+  }
+
+  const seg = locateSegment(response.text, text);
+  if (!seg) {
+    return { domains: [], precise: true };
+  }
+
+  const relevant = supports.filter(s => {
+    const seg2 = s?.segment;
+    if (!seg2) return false;
+    const segStart = seg2.startIndex ?? 0;
+    const segEnd = seg2.endIndex ?? segStart;
+    return segStart < seg.end && segEnd > seg.start;
+  });
+
+  const chunkIndices = new Set();
+  relevant.forEach(s => (s.groundingChunkIndices || []).forEach(i => chunkIndices.add(i)));
+
+  const domains = [...chunkIndices].map(i => resolvedChunkDomains[i]).filter(Boolean);
+  return { domains, precise: true };
+}
+
+// 💡 뉴스 항목 검증: (1) source가 화이트리스트에 있는가 (2) 실제로 그 언론사 도메인의 검색 근거가 존재하는가
+function validateNewsItem(item, supportingDomains) {
+  if (!item?.text || !item?.source) {
     return { ok: false, reason: 'missing_field' };
   }
 
-  const itemDomain = getDomain(item.url);
-  if (!itemDomain) {
-    return { ok: false, reason: 'invalid_url' };
-  }
-
-  // (1) 모델이 제시한 URL의 도메인이, 실제 Google Search grounding 결과 도메인 목록에 존재하는가
-  const isGrounded = groundedDomains.some(
-    d => d === itemDomain || itemDomain.endsWith(`.${d}`) || d.endsWith(`.${itemDomain}`)
-  );
-  if (!isGrounded) {
-    return { ok: false, reason: 'not_in_grounding' };
-  }
-
-  // (2) source(언론사 표기)가 화이트리스트에 있고, 그 도메인과 실제 url 도메인이 일치하는가
   const allowedDomains = TRUSTED_DOMAINS[item.source];
   if (!allowedDomains) {
     return { ok: false, reason: 'unknown_outlet' };
   }
-  const domainMatches = allowedDomains.some(
-    d => itemDomain === d || itemDomain.endsWith(`.${d}`)
+
+  if (!supportingDomains || supportingDomains.length === 0) {
+    return { ok: false, reason: 'no_grounding_support' };
+  }
+
+  const matched = supportingDomains.some(d =>
+    allowedDomains.some(ad => d === ad || d.endsWith(`.${ad}`))
   );
-  if (!domainMatches) {
+  if (!matched) {
     return { ok: false, reason: 'source_domain_mismatch' };
   }
 
@@ -442,6 +508,8 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
     timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short'
   });
 
+  const trustedOutletList = Object.keys(TRUSTED_DOMAINS).join(', ');
+
   const prompt = `
 당신은 사실(Fact) 검증을 최우선으로 하는 전문 뉴스 에디터입니다. 반드시 Google Search 도구로 실제 검색되는 기사만 근거로 삼으십시오. 절대 기억이나 추정으로 기사를 지어내지 마십시오.
 
@@ -455,11 +523,14 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
 [검색 타깃 분야]: ${secConfig.category}
 [검색 키워드 힌트]: "${secConfig.searchFocus}", "${dateInfo.isoDate}"
 
-[항목별 필수 필드 - 4개 모두 필수]
+[source 표기 규칙 - 중요]
+source에는 실제 검색된 기사가 게재된 언론사명을 아래 목록에 있는 표기와 정확히 동일하게 적으십시오 (다른 표기, 축약, 오타 금지):
+${trustedOutletList}
+위 목록에 있는 언론사가 검색되지 않았다면 그 사실 자체를 다른 언론사로 대체하지 말고, 검증 가능한 기사만 남기십시오.
+
+[항목별 필수 필드]
 1. text: 팩트 뉴스 요약 문장. 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성 (~함, ~임 종결 금지)
-2. source: 실제 언론사명 (검색 결과에 표기된 것 그대로)
-3. url: 검색 결과에 실제로 나타난 해당 기사의 정확한 URL (임의 생성 절대 금지 — 검색되지 않았다면 이 항목 자체를 제외할 것)
-4. published_at: 검색 결과에서 확인한 게재 일시 (모르면 이 항목을 제외할 것)
+2. source: 위 목록 중 실제로 검색된 언론사명 (목록 표기와 정확히 일치)
 
 [스포츠 섹션 예외]: 지정 선수의 당일 경기 소식이 없으면 KBO, EPL, 국내 골프 등 오늘자 가장 뜨거운 스포츠 팩트 기사로 대체하되, 위 시간/검증 제약은 동일하게 적용할 것.
 
@@ -470,7 +541,7 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
   "category": "${secConfig.category}",
   "icon": "${secConfig.icon}",
   "items": [
-    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명", "url": "실제 기사 URL", "published_at": "게재 일시" }
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" }
   ]
 }
 \`\`\``;
@@ -485,10 +556,16 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
   });
 
   const parsed = extractJson(response.text);
-  const groundedDomains = extractGroundedDomains(response);
+
+  // 리다이렉트 프록시 링크를 실제 도메인으로 해석 (섹션당 grounding 청크 수만큼 네트워크 요청)
+  const resolvedChunkDomains = await resolveGroundingChunkDomains(response);
 
   const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
-  const checked = rawItems.map(item => ({ item, result: validateNewsItem(item, groundedDomains) }));
+  const checked = rawItems.map(item => {
+    const { domains, precise } = getSupportingDomains(response, resolvedChunkDomains, item?.text);
+    const result = validateNewsItem(item, domains);
+    return { item, result, precise };
+  });
   const accepted = checked.filter(c => c.result.ok).map(c => c.item);
   const rejected = checked.filter(c => !c.result.ok);
 
@@ -496,7 +573,8 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
     console.warn(`  ⚠️ [${secConfig.category}] ${rejected.length}건 검증 실패로 제외:`);
     rejected.forEach(r => {
       const preview = (r.item?.text || '(텍스트 없음)').slice(0, 40);
-      console.warn(`     - "${preview}..." → 사유: ${r.result.reason}`);
+      const mode = r.precise ? '문장단위' : '섹션전체(완화)';
+      console.warn(`     - "${preview}..." → 사유: ${r.result.reason} [${mode}]`);
     });
   }
 
@@ -508,7 +586,7 @@ async function generateSingleNewsSection(secConfig, dateInfo) {
     id: parsed.id || secConfig.id,
     category: parsed.category || secConfig.category,
     icon: parsed.icon || secConfig.icon,
-    // 최종 저장 포맷은 기존과 동일하게 text/source만 유지 (url/published_at은 검증용으로만 사용)
+    // 최종 저장 포맷은 기존과 동일하게 text/source만 유지
     items: accepted.map(({ text, source }) => ({ text, source }))
   };
 }
