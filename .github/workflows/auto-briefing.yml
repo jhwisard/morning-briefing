@@ -40,4 +40,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 💡 간추린 뉴스의 네이버 뉴스 API 후보 소스용 (없으면 스크립트가 자동으로 RSS만 사용하고 건너뜀)
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          # 💡 SerpAPI를 실제로 쓰는 경우에만 등록 — 안 쓰면 이 줄은 지우거나 시크릿을 비워두면 됨
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: node scripts/gemini-auto-publish.js ${{ github.event.inputs.category || 'all' }}
