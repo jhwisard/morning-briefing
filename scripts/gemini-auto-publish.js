@@ -620,7 +620,7 @@ ${trustedOutletList}
   const checked = await Promise.all(rawItems.map(async item => {
     const { targets, precise } = getSupportingTargets(response, resolvedChunkTargets, item?.text);
     const result = await validateNewsItem(item, targets);
-    return { item, result, precise };
+    return { item, result, precise, targets };
   }));
   const accepted = checked.filter(c => c.result.ok).map(c => c.item);
   const rejected = checked.filter(c => !c.result.ok);
@@ -631,7 +631,8 @@ ${trustedOutletList}
       const preview = (r.item?.text || '(텍스트 없음)').slice(0, 40);
       const mode = r.precise ? '문장단위' : '섹션전체(완화)';
       const src = r.item?.source || '(source 없음)';
-      console.warn(`     - [${src}] "${preview}..." → 사유: ${r.result.reason} [${mode}]`);
+      const resolvedDomains = (r.targets || []).map(t => t.domain).join(', ') || '(없음)';
+      console.warn(`     - [${src}] "${preview}..." → 사유: ${r.result.reason} [${mode}] | 실제 해석된 도메인: ${resolvedDomains}`);
     });
   }
 
