@@ -94,6 +94,11 @@ const TRUSTED_DOMAINS = {
   '아이뉴스24': ['inews24.com'],
   '메트로신문': ['metroseoul.co.kr'],
   '공정뉴스': ['fairnews.co.kr'],
+  '아주경제': ['ajunews.com'],
+  'SBS Biz': ['biz.sbs.co.kr'],
+  '한국금융신문': ['fntimes.com'],
+  '코리아중앙데일리': ['koreajoongangdaily.joins.com'],
+  '더구루': ['theguru.co.kr'],
 
   // ── 경제/증권 매체 ──
   '매일경제': ['mk.co.kr'],
@@ -327,39 +332,52 @@ function getDomain(url) {
 // 실제 도메인을 알려면 이 리다이렉트를 서버에서 직접 따라가(fetch) 최종 URL을 확인해야 합니다.
 const REDIRECT_DOMAIN_CACHE = new Map();
 
-async function resolveRedirectDomain(uri) {
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+};
+
+// 💡 네이버뉴스/다음뉴스 등 포털 도메인 — 한국 뉴스의 상당수가 원 언론사 도메인이 아니라
+// 이 포털 syndication 페이지로 검색되므로, 도메인만으로는 원 언론사를 판별할 수 없다.
+// 이 경우 페이지 내용(og:site_name, 본문 등)을 직접 확인해 원 언론사 표기를 대조한다.
+const AGGREGATOR_DOMAINS = ['naver.com', 'daum.net', 'news.google.com', 'google.com'];
+
+function isAggregatorDomain(domain) {
+  if (!domain) return false;
+  return AGGREGATOR_DOMAINS.some(d => domain === d || domain.endsWith(`.${d}`));
+}
+
+async function resolveRedirectTarget(uri) {
   if (!uri) return null;
   if (REDIRECT_DOMAIN_CACHE.has(uri)) return REDIRECT_DOMAIN_CACHE.get(uri);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  };
 
   try {
     let res;
     try {
-      res = await fetch(uri, { method: 'HEAD', redirect: 'follow', signal: controller.signal, headers });
+      res = await fetch(uri, { method: 'HEAD', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
     } catch {
       // 일부 서버는 HEAD를 거부하므로 GET으로 재시도
-      res = await fetch(uri, { method: 'GET', redirect: 'follow', signal: controller.signal, headers });
+      res = await fetch(uri, { method: 'GET', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
     }
-    const finalDomain = getDomain(res.url) || getDomain(uri);
-    REDIRECT_DOMAIN_CACHE.set(uri, finalDomain);
-    return finalDomain;
+    const finalUrl = res.url || uri;
+    const result = { url: finalUrl, domain: getDomain(finalUrl) || getDomain(uri) };
+    REDIRECT_DOMAIN_CACHE.set(uri, result);
+    return result;
   } catch (err) {
-    REDIRECT_DOMAIN_CACHE.set(uri, null);
-    return null;
+    const result = { url: null, domain: null };
+    REDIRECT_DOMAIN_CACHE.set(uri, result);
+    return result;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-// 💡 응답에 포함된 모든 grounding 청크의 리다이렉트를 실제 도메인으로 해석 (인덱스 순서 그대로 유지)
-async function resolveGroundingChunkDomains(response) {
+// 💡 응답에 포함된 모든 grounding 청크의 리다이렉트를 실제 {url, domain}으로 해석 (인덱스 순서 그대로 유지)
+async function resolveGroundingChunkTargets(response) {
   const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  return Promise.all(chunks.map(c => resolveRedirectDomain(c?.web?.uri)));
+  return Promise.all(chunks.map(c => resolveRedirectTarget(c?.web?.uri)));
 }
 
 // 💡 원문 텍스트(response.text, 즉 JSON 원본 문자열) 안에서 item.text가 실제로 위치한 구간을 찾는다.
@@ -376,20 +394,20 @@ function locateSegment(rawText, value) {
   return null;
 }
 
-// 💡 특정 문장(item.text)을 실제로 뒷받침하는 grounding 청크의 (해석된) 도메인 목록을 구한다.
+// 💡 특정 문장(item.text)을 실제로 뒷받침하는 grounding 청크의 (해석된) {url, domain} 목록을 구한다.
 // groundingSupports는 "이 문장 구간은 이 청크(들)에서 근거했다"는 매핑 정보를 제공한다 (문장 단위 인용 근거).
-function getSupportingDomains(response, resolvedChunkDomains, text) {
+function getSupportingTargets(response, resolvedChunkTargets, text) {
   const supports = response?.candidates?.[0]?.groundingMetadata?.groundingSupports;
 
   // groundingSupports 자체가 없는 응답이면(모델/버전에 따라 생략될 수 있음) 문장 단위 매칭이 불가능하므로
-  // 이 섹션 응답 전체에서 실제로 검색된 도메인 목록으로 완화해서 검증한다 (그래도 "실제 검색되지 않은 도메인"은 여전히 걸러진다).
+  // 이 섹션 응답 전체에서 실제로 검색된 대상으로 완화해서 검증한다 (그래도 "실제 검색되지 않은 도메인"은 여전히 걸러진다).
   if (!Array.isArray(supports) || supports.length === 0) {
-    return { domains: resolvedChunkDomains.filter(Boolean), precise: false };
+    return { targets: resolvedChunkTargets.filter(t => t?.domain), precise: false };
   }
 
   const seg = locateSegment(response.text, text);
   if (!seg) {
-    return { domains: [], precise: true };
+    return { targets: [], precise: true };
   }
 
   const relevant = supports.filter(s => {
@@ -403,12 +421,40 @@ function getSupportingDomains(response, resolvedChunkDomains, text) {
   const chunkIndices = new Set();
   relevant.forEach(s => (s.groundingChunkIndices || []).forEach(i => chunkIndices.add(i)));
 
-  const domains = [...chunkIndices].map(i => resolvedChunkDomains[i]).filter(Boolean);
-  return { domains, precise: true };
+  const targets = [...chunkIndices].map(i => resolvedChunkTargets[i]).filter(t => t?.domain);
+  return { targets, precise: true };
 }
 
-// 💡 뉴스 항목 검증: (1) source가 화이트리스트에 있는가 (2) 실제로 그 언론사 도메인의 검색 근거가 존재하는가
-function validateNewsItem(item, supportingDomains) {
+// 💡 포털(네이버/다음) syndication 페이지의 실제 원문 HTML을 가져와 og:site_name / 본문에서
+// 언론사 표기를 직접 확인한다. 도메인만으로 판별 불가능한 경우의 2차 검증 수단.
+const PAGE_CONTENT_CACHE = new Map();
+
+async function fetchPageOutletHints(url) {
+  if (!url) return '';
+  if (PAGE_CONTENT_CACHE.has(url)) return PAGE_CONTENT_CACHE.get(url);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
+    const html = await res.text();
+    // og:site_name, title 태그 등 언론사 표기가 나올 만한 부분만 추출 (전체를 다 검사할 필요는 없음)
+    const ogSiteMatch = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i);
+    const titleMatch = html.match(/<title>([^<]{0,200})<\/title>/i);
+    const hints = [ogSiteMatch?.[1], titleMatch?.[1], html.slice(0, 3000)].filter(Boolean).join(' ');
+    PAGE_CONTENT_CACHE.set(url, hints);
+    return hints;
+  } catch (err) {
+    PAGE_CONTENT_CACHE.set(url, '');
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// 💡 뉴스 항목 검증 (비동기): (1) source가 화이트리스트에 있는가
+// (2) 원 언론사 도메인에서 직접 검색됐거나, (3) 포털(네이버/다음) 경유라면 페이지 내용에서 해당 언론사 표기가 실제로 확인되는가
+async function validateNewsItem(item, supportingTargets) {
   if (!item?.text || !item?.source) {
     return { ok: false, reason: 'missing_field' };
   }
@@ -418,18 +464,28 @@ function validateNewsItem(item, supportingDomains) {
     return { ok: false, reason: 'unknown_outlet' };
   }
 
-  if (!supportingDomains || supportingDomains.length === 0) {
+  if (!supportingTargets || supportingTargets.length === 0) {
     return { ok: false, reason: 'no_grounding_support' };
   }
 
-  const matched = supportingDomains.some(d =>
-    allowedDomains.some(ad => d === ad || d.endsWith(`.${ad}`))
+  // (2) 원 언론사 도메인과 직접 일치
+  const directMatch = supportingTargets.some(t =>
+    allowedDomains.some(ad => t.domain === ad || t.domain.endsWith(`.${ad}`))
   );
-  if (!matched) {
-    return { ok: false, reason: 'source_domain_mismatch' };
+  if (directMatch) return { ok: true, via: 'direct_domain' };
+
+  // (3) 포털 경유 — 실제 페이지 내용에서 언론사 표기를 확인
+  const aggregatorTargets = supportingTargets.filter(t => isAggregatorDomain(t.domain));
+  for (const t of aggregatorTargets) {
+    const hints = await fetchPageOutletHints(t.url);
+    if (!hints) continue;
+    const mentionsOutlet =
+      hints.includes(item.source) ||
+      allowedDomains.some(ad => hints.includes(ad));
+    if (mentionsOutlet) return { ok: true, via: 'aggregator_content_check' };
   }
 
-  return { ok: true };
+  return { ok: false, reason: 'source_domain_mismatch' };
 }
 
 // 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
@@ -557,15 +613,15 @@ ${trustedOutletList}
 
   const parsed = extractJson(response.text);
 
-  // 리다이렉트 프록시 링크를 실제 도메인으로 해석 (섹션당 grounding 청크 수만큼 네트워크 요청)
-  const resolvedChunkDomains = await resolveGroundingChunkDomains(response);
+  // 리다이렉트 프록시 링크를 실제 {url, domain}으로 해석 (섹션당 grounding 청크 수만큼 네트워크 요청)
+  const resolvedChunkTargets = await resolveGroundingChunkTargets(response);
 
   const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
-  const checked = rawItems.map(item => {
-    const { domains, precise } = getSupportingDomains(response, resolvedChunkDomains, item?.text);
-    const result = validateNewsItem(item, domains);
+  const checked = await Promise.all(rawItems.map(async item => {
+    const { targets, precise } = getSupportingTargets(response, resolvedChunkTargets, item?.text);
+    const result = await validateNewsItem(item, targets);
     return { item, result, precise };
-  });
+  }));
   const accepted = checked.filter(c => c.result.ok).map(c => c.item);
   const rejected = checked.filter(c => !c.result.ok);
 
@@ -574,7 +630,8 @@ ${trustedOutletList}
     rejected.forEach(r => {
       const preview = (r.item?.text || '(텍스트 없음)').slice(0, 40);
       const mode = r.precise ? '문장단위' : '섹션전체(완화)';
-      console.warn(`     - "${preview}..." → 사유: ${r.result.reason} [${mode}]`);
+      const src = r.item?.source || '(source 없음)';
+      console.warn(`     - [${src}] "${preview}..." → 사유: ${r.result.reason} [${mode}]`);
     });
   }
 
