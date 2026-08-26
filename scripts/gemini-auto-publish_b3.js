@@ -1,13 +1,10 @@
 /**
  * scripts/gemini-auto-publish.js
  *
- * 1. 간추린 뉴스: "실제 존재가 확인된 기사"만 후보로 모은 뒤 Gemini는 그 중에서 고르고 요약만 함
- *    - 후보 소스 3종 (전부 선택적, 있는 만큼만 사용): 공식 RSS 피드 / 네이버 뉴스 검색 API / SerpAPI(Google News)
- *    - source·url은 모델이 적은 텍스트가 아니라 우리가 직접 수집한 후보 데이터에서 채움 (hallucination 원천 차단)
- *    - 각 후보의 실제 pubDate로 48시간 필터링 (모델의 "판단"에 의존하지 않음)
- *    - 필요한 환경변수: NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (선택, NCP 콘솔 AI·NAVER API > Application에서 발급),
- *      SERPAPI_KEY (선택, serpapi.com) — 없으면 해당 소스는 건너뛰고 RSS만 사용
- *    - npm install rss-parser 필요
+ * 1. 간추린 뉴스: 8대 분야 청크 병렬 검색 (실시간 팩트 기사 수집)
+ *    - Google Search grounding 메타데이터와 대조해 실제 검색되지 않은 URL/기사는 제외
+ *    - 신뢰 언론사 화이트리스트(약 100곳) 도메인과 source 표기가 일치하는지 검증
+ *    - 게재 후 48시간 이내 기사만 채택 (개수 미달 시 억지로 채우지 않음)
  * 2. 주식 모닝 브리핑: yahoo-finance2 실시간 지수 수치 확정 주입 + Gemini 시황/전략 분석
  * 3. 데일리 인사이트: 최근 30일 중복 검증 & 자동 재시도(Retry) 파이프라인
  *
@@ -23,15 +20,6 @@ loadEnvConfig(process.cwd());
 
 const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
-const RssParser = require('rss-parser'); // npm install rss-parser 필요
-
-// 💡 뉴스 후보 확보용 선택적 API 키 (없으면 해당 소스는 건너뛰고 RSS만 사용)
-// - NAVER_CLIENT_ID/SECRET: NCP(네이버클라우드플랫폼) 콘솔 > AI·Application Service > AI·NAVER API > Application
-//   메뉴에서 발급 (2025~2026년에 developers.naver.com 방식에서 API HUB로 이관됨 — 예전 방식 키는 사용 불가)
-// - SERPAPI_KEY: https://serpapi.com 계정의 API 키 (유료, Google News 결과를 구조화된 JSON으로 제공)
-const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID?.trim();
-const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET?.trim();
-const SERPAPI_KEY = process.env.SERPAPI_KEY?.trim();
 
 // 1. 환경 변수 검증
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
@@ -60,76 +48,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 });
 
 // 💡 8대 뉴스 섹션별 전용 검색 쿼리 설정
-// ⚠️ feeds의 RSS 주소 중 일부(특히 한국 언론사)는 이 세션의 네트워크 제약으로 직접 검증하지 못했습니다.
-// 반드시 운영 서버에서 한 번 실행해 로그의 "[RSS 실패]" 항목을 확인하고, 깨진 URL은 해당 언론사의
-// 최신 공식 RSS 주소로 교체하세요 (대부분 사이트 하단 "RSS" 링크 또는 /rss, /feed 경로에 있습니다).
 const NEWS_SECTIONS_CONFIG = [
-  {
-    id: 'sec_1', category: '[美미국]', icon: 'Globe',
-    searchFocus: '미국 정치 경제 외교 주요 뉴스', naverQuery: '미국 정치 경제 외교',
-    feeds: [
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml' },
-      { name: 'NYT', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml' },
-      { name: '가디언', url: 'https://www.theguardian.com/us-news/rss' },
-      { name: 'NPR', url: 'https://feeds.npr.org/1001/rss.xml' }
-    ]
-  },
-  {
-    id: 'sec_2', category: '[中중국,대만]', icon: 'Globe',
-    searchFocus: '중국 대만 양안관계 뉴스', naverQuery: '중국 대만 양안관계',
-    feeds: [
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/asia/rss.xml' },
-      { name: '타이베이타임스', url: 'https://www.taipeitimes.com/xml/index.rss' } // 확인 필요
-    ]
-  },
-  {
-    id: 'sec_3', category: '[러시아,우크라이나,이스라엘,이란,북한]', icon: 'Globe',
-    searchFocus: '러시아 우크라이나 이스라엘 이란 북한 안보 뉴스', naverQuery: '러시아 우크라이나 이스라엘 이란 북한',
-    feeds: [
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/rss.xml' },
-      { name: '알자지라', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
-      { name: '타임스오브이스라엘', url: 'https://www.timesofisrael.com/feed/' } // 확인 필요
-    ]
-  },
-  {
-    id: 'sec_4', category: '[英영국,佛프랑스,獨독일]', icon: 'Globe',
-    searchFocus: '영국 프랑스 독일 유럽연합 뉴스', naverQuery: '영국 프랑스 독일 유럽연합',
-    feeds: [
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/uk/rss.xml' },
-      { name: '가디언', url: 'https://www.theguardian.com/world/europe-news/rss' },
-      { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all' } // 확인 필요
-    ]
-  },
-  {
-    id: 'sec_5', category: '[日일본]', icon: 'Globe',
-    searchFocus: '일본 정치 경제 사회 뉴스', naverQuery: '일본 정치 경제 사회',
-    feeds: [
-      { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' }, // 확인 필요
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/asia/rss.xml' }
-    ]
-  },
-  {
-    id: 'sec_6', category: '[한국.정치.사회]', icon: 'Globe',
-    searchFocus: '한국 정치 사회 주요 뉴스', naverQuery: '한국 정치 사회 정부 국회',
-    feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/politics.xml' }, // 확인 필요
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/society.xml' } // 확인 필요
-    ]
-  },
-  {
-    id: 'sec_7', category: '[한국.경제]', icon: 'TrendingUp',
-    searchFocus: '한국 경제 금융 증시 뉴스', naverQuery: '한국 경제 금융 증시 부동산',
-    feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' } // 확인 필요
-    ]
-  },
-  {
-    id: 'sec_8', category: '[스포츠:이정후.안세영.KLPGA.PBA]', icon: 'Sparkles',
-    searchFocus: '한국 스포츠 야구 골프 배드민턴 뉴스', naverQuery: '이정후 안세영 KLPGA 프로야구 KBO',
-    feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' } // 확인 필요
-    ]
-  }
+  { id: 'sec_1', category: '[美미국]', icon: 'Globe', searchFocus: '오늘 미국 주요 뉴스 정치 경제 외교 현지 외신 US news headlines' },
+  { id: 'sec_2', category: '[中중국,대만]', icon: 'Globe', searchFocus: '오늘 중국 대만 주요 뉴스 양안관계 경제 정책 외신' },
+  { id: 'sec_3', category: '[러시아,우크라이나,이스라엘,이란,북한]', icon: 'Globe', searchFocus: '러시아 우크라이나 전쟁 이스라엘 이란 중동 북한 미사일 안보 외신' },
+  { id: 'sec_4', category: '[英영국,佛프랑스,獨독일]', icon: 'Globe', searchFocus: '영국 프랑스 독일 유럽연합 EU 주요 뉴스 외신 UK France Germany headlines' },
+  { id: 'sec_5', category: '[日일본]', icon: 'Globe', searchFocus: '일본 오늘 주요 뉴스 엔화 경제 정치 사회 현지 보도' },
+  { id: 'sec_6', category: '[한국.정치.사회]', icon: 'Globe', searchFocus: '오늘 한국 주요 정치 사회 톱뉴스 정부 국회 정책 사건사고 헤드라인' },
+  { id: 'sec_7', category: '[한국.경제]', icon: 'TrendingUp', searchFocus: '오늘 한국 경제 금융 부동산 증시 기업 실적 주요 경제 뉴스' },
+  { id: 'sec_8', category: '[스포츠:이정후.안세영.KLPGA.PBA]', icon: 'Sparkles', searchFocus: '오늘 스포츠 주요 뉴스 이정후 MLB 안세영 골프 PBA 당구 손흥민 프로야구 KBO' }
 ];
 
 // 💡 신뢰 언론사 화이트리스트 (약 100개) — source 표기와 실제 도메인 대조용
@@ -390,19 +317,7 @@ function extractJson(rawText) {
   }
 }
 
-// 💡 도메인 -> 화이트리스트 표기명 역참조 (Naver/SerpAPI 결과의 도메인을 예쁜 언론사명으로 표시할 때 사용.
-// 목록에 없는 도메인이어도 기사 자체를 버리지 않고 도메인 문자열을 그대로 source로 사용한다 — 표시명일 뿐, 신뢰 판단 기준이 아니다)
-const DOMAIN_TO_OUTLET = {};
-for (const [name, domains] of Object.entries(TRUSTED_DOMAINS)) {
-  domains.forEach(d => { DOMAIN_TO_OUTLET[d] = name; });
-}
-function outletNameForDomain(domain) {
-  if (!domain) return null;
-  if (DOMAIN_TO_OUTLET[domain]) return DOMAIN_TO_OUTLET[domain];
-  const matchKey = Object.keys(DOMAIN_TO_OUTLET).find(d => domain.endsWith(`.${d}`));
-  return matchKey ? DOMAIN_TO_OUTLET[matchKey] : null;
-}
-
+// 💡 URL에서 도메인만 추출 (www. 접두어 제거)
 function getDomain(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
@@ -411,154 +326,166 @@ function getDomain(url) {
   }
 }
 
-function stripHtmlEntities(s) {
-  return (s || '')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .trim();
+// 💡 [중요] Gemini googleSearch grounding의 groundingChunks[].web.uri는 실제 기사 URL이 아니라
+// 구글 자체의 리다이렉트 프록시 링크(예: vertexaisearch.cloud.google.com/grounding-api-redirect/...)입니다.
+// 그래서 이 링크의 "도메인"을 직접 화이트리스트와 비교하면 절대 매칭될 수 없습니다.
+// 실제 도메인을 알려면 이 리다이렉트를 서버에서 직접 따라가(fetch) 최종 URL을 확인해야 합니다.
+const REDIRECT_DOMAIN_CACHE = new Map();
+
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+};
+
+// 💡 네이버뉴스/다음뉴스 등 포털 도메인 — 한국 뉴스의 상당수가 원 언론사 도메인이 아니라
+// 이 포털 syndication 페이지로 검색되므로, 도메인만으로는 원 언론사를 판별할 수 없다.
+// 이 경우 페이지 내용(og:site_name, 본문 등)을 직접 확인해 원 언론사 표기를 대조한다.
+const AGGREGATOR_DOMAINS = ['naver.com', 'daum.net', 'news.google.com', 'google.com'];
+
+function isAggregatorDomain(domain) {
+  if (!domain) return false;
+  return AGGREGATOR_DOMAINS.some(d => domain === d || domain.endsWith(`.${d}`));
 }
 
-// ============================================================
-// 💡 [핵심 아키텍처] "실제로 존재하는 기사"를 먼저 확보한 뒤 Gemini에게는
-// 그 후보 목록 안에서 고르고 요약만 시킨다. source/link/pubDate는 전부
-// 우리가 직접 수집한 데이터에서 채우고, 모델이 적어낸 텍스트는 절대 신뢰하지 않는다.
-// 그래서 모델이 언론사명이나 URL을 "지어낼" 방법 자체가 없다.
-//
-// 후보 소스 3종 (전부 선택적, 있는 만큼만 사용):
-//   1) 공식 RSS 피드 (무료, 인증 불필요) — secConfig.feeds
-//   2) 네이버 뉴스 검색 API (선택, 공식 인증 API) — NAVER_CLIENT_ID/SECRET 필요
-//   3) SerpAPI Google News (선택, 유료 구조화 검색) — SERPAPI_KEY 필요
-// ============================================================
+async function resolveRedirectTarget(uri) {
+  if (!uri) return null;
+  if (REDIRECT_DOMAIN_CACHE.has(uri)) return REDIRECT_DOMAIN_CACHE.get(uri);
 
-const RSS_PARSER = new RssParser({
-  timeout: 8000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  }
-});
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
 
-async function fetchRssCandidates(feed) {
   try {
-    const parsed = await RSS_PARSER.parseURL(feed.url);
-    return (parsed.items || []).map(item => {
-      const pubMs = item.isoDate ? Date.parse(item.isoDate) : (item.pubDate ? Date.parse(item.pubDate) : NaN);
-      return {
-        source: feed.name,
-        title: (item.title || '').trim(),
-        link: item.link,
-        pubDate: item.isoDate || item.pubDate || null,
-        pubMs
-      };
-    });
+    let res;
+    try {
+      res = await fetch(uri, { method: 'HEAD', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
+    } catch {
+      // 일부 서버는 HEAD를 거부하므로 GET으로 재시도
+      res = await fetch(uri, { method: 'GET', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
+    }
+    const finalUrl = res.url || uri;
+    const result = { url: finalUrl, domain: getDomain(finalUrl) || getDomain(uri) };
+    REDIRECT_DOMAIN_CACHE.set(uri, result);
+    return result;
   } catch (err) {
-    console.warn(`  ⚠️ [RSS 실패] ${feed.name} (${feed.url}) - ${err.message}`);
-    return [];
+    const result = { url: null, domain: null };
+    REDIRECT_DOMAIN_CACHE.set(uri, result);
+    return result;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-// ⚠️ 2025~2026년에 네이버 뉴스 검색 API가 개발자센터(developers.naver.com)에서
-// NAVER Cloud Platform의 API HUB로 이관되었습니다. 예전 엔드포인트/헤더는 더 이상 쓰지 않습니다.
-//   - 엔드포인트: openapi.naver.com/v1/search/news.json → naverapihub.apigw.ntruss.com/search/v1/news
-//   - 인증 헤더: X-Naver-Client-Id/Secret → X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY
-//   - 키 발급: NCP 콘솔 > AI·Application Service > AI·NAVER API > Application 메뉴에서 새로 발급
-async function fetchNaverNewsCandidates(query) {
-  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET || !query) return [];
+// 💡 응답에 포함된 모든 grounding 청크의 리다이렉트를 실제 {url, domain}으로 해석 (인덱스 순서 그대로 유지)
+async function resolveGroundingChunkTargets(response) {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  return Promise.all(chunks.map(c => resolveRedirectTarget(c?.web?.uri)));
+}
+
+// 💡 원문 텍스트(response.text, 즉 JSON 원본 문자열) 안에서 item.text가 실제로 위치한 구간을 찾는다.
+// JSON.parse된 값과 원본 문자열의 이스케이프 방식이 다를 수 있어 두 가지 방식으로 시도한다.
+function locateSegment(rawText, value) {
+  if (!rawText || !value) return null;
+  let idx = rawText.indexOf(value);
+  if (idx !== -1) return { start: idx, end: idx + value.length };
+
+  const escaped = JSON.stringify(value).slice(1, -1);
+  idx = rawText.indexOf(escaped);
+  if (idx !== -1) return { start: idx, end: idx + escaped.length };
+
+  return null;
+}
+
+// 💡 특정 문장(item.text)을 실제로 뒷받침하는 grounding 청크의 (해석된) {url, domain} 목록을 구한다.
+// groundingSupports는 "이 문장 구간은 이 청크(들)에서 근거했다"는 매핑 정보를 제공한다 (문장 단위 인용 근거).
+function getSupportingTargets(response, resolvedChunkTargets, text) {
+  const supports = response?.candidates?.[0]?.groundingMetadata?.groundingSupports;
+
+  // groundingSupports 자체가 없는 응답이면(모델/버전에 따라 생략될 수 있음) 문장 단위 매칭이 불가능하므로
+  // 이 섹션 응답 전체에서 실제로 검색된 대상으로 완화해서 검증한다 (그래도 "실제 검색되지 않은 도메인"은 여전히 걸러진다).
+  if (!Array.isArray(supports) || supports.length === 0) {
+    return { targets: resolvedChunkTargets.filter(t => t?.domain), precise: false };
+  }
+
+  const seg = locateSegment(response.text, text);
+  if (!seg) {
+    return { targets: [], precise: true };
+  }
+
+  const relevant = supports.filter(s => {
+    const seg2 = s?.segment;
+    if (!seg2) return false;
+    const segStart = seg2.startIndex ?? 0;
+    const segEnd = seg2.endIndex ?? segStart;
+    return segStart < seg.end && segEnd > seg.start;
+  });
+
+  const chunkIndices = new Set();
+  relevant.forEach(s => (s.groundingChunkIndices || []).forEach(i => chunkIndices.add(i)));
+
+  const targets = [...chunkIndices].map(i => resolvedChunkTargets[i]).filter(t => t?.domain);
+  return { targets, precise: true };
+}
+
+// 💡 포털(네이버/다음) syndication 페이지의 실제 원문 HTML을 가져와 og:site_name / 본문에서
+// 언론사 표기를 직접 확인한다. 도메인만으로 판별 불가능한 경우의 2차 검증 수단.
+const PAGE_CONTENT_CACHE = new Map();
+
+async function fetchPageOutletHints(url) {
+  if (!url) return '';
+  if (PAGE_CONTENT_CACHE.has(url)) return PAGE_CONTENT_CACHE.get(url);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
   try {
-    const url = `https://naverapihub.apigw.ntruss.com/search/v1/news?query=${encodeURIComponent(query)}&display=20&sort=date`;
-    const res = await fetch(url, {
-      headers: {
-        'X-NCP-APIGW-API-KEY-ID': NAVER_CLIENT_ID,
-        'X-NCP-APIGW-API-KEY': NAVER_CLIENT_SECRET
-      }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    return (json.items || []).map(it => {
-      const link = it.originallink || it.link;
-      const domain = getDomain(link);
-      const pubMs = it.pubDate ? Date.parse(it.pubDate) : NaN;
-      return {
-        source: outletNameForDomain(domain) || domain || '네이버뉴스',
-        title: stripHtmlEntities(it.title),
-        link,
-        pubDate: it.pubDate || null,
-        pubMs
-      };
-    });
+    const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal, headers: BROWSER_HEADERS });
+    const html = await res.text();
+    // og:site_name, title 태그 등 언론사 표기가 나올 만한 부분만 추출 (전체를 다 검사할 필요는 없음)
+    const ogSiteMatch = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i);
+    const titleMatch = html.match(/<title>([^<]{0,200})<\/title>/i);
+    const hints = [ogSiteMatch?.[1], titleMatch?.[1], html.slice(0, 3000)].filter(Boolean).join(' ');
+    PAGE_CONTENT_CACHE.set(url, hints);
+    return hints;
   } catch (err) {
-    console.warn(`  ⚠️ [네이버 뉴스 API 실패] "${query}" - ${err.message}`);
-    return [];
+    PAGE_CONTENT_CACHE.set(url, '');
+    return '';
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-// ⚠️ SerpAPI 응답 필드는 엔진/플랜에 따라 조금씩 다를 수 있습니다.
-// 아래는 engine=google_news 기준 표준 응답 형태를 가정한 구현이며, 실제 계정으로 한 번 테스트해서
-// news_results[].date 형식이 Date.parse로 정상 해석되는지 반드시 확인하시길 권장합니다.
-// (해석 실패 시 해당 기사는 "게재시각 미확인"으로 간주되어 자동으로 제외됩니다 — 안전한 방향의 기본값입니다.)
-async function fetchSerpApiCandidates(query) {
-  if (!SERPAPI_KEY || !query) return [];
-  try {
-    const url = `https://serpapi.com/search.json?engine=google_news&q=${encodeURIComponent(query)}&hl=ko&gl=kr&api_key=${SERPAPI_KEY}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    return (json.news_results || []).map(it => {
-      const link = it.link;
-      const domain = getDomain(link);
-      const pubMs = it.date ? Date.parse(it.date) : NaN;
-      return {
-        source: it.source?.name || outletNameForDomain(domain) || domain || 'SerpAPI',
-        title: it.title,
-        link,
-        pubDate: it.date || null,
-        pubMs
-      };
-    });
-  } catch (err) {
-    console.warn(`  ⚠️ [SerpAPI 실패] "${query}" - ${err.message}`);
-    return [];
-  }
-}
-
-function normalizeForDedupe(title) {
-  return (title || '').replace(/\s+/g, '').slice(0, 30);
-}
-
-function dedupeCandidates(list) {
-  const seen = new Set();
-  const out = [];
-  for (const c of list) {
-    if (!c || !c.title || !c.link) continue;
-    const key = `${getDomain(c.link) || ''}|${normalizeForDedupe(c.title)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(c);
-  }
-  return out;
-}
-
-// 💡 한 섹션(분야)에 대해 RSS + 네이버 API + SerpAPI 후보를 모두 모으고,
-// 48시간 이내 + 게재시각 확인 가능한 기사만 남긴 뒤 최신순으로 정렬해 반환한다.
-async function fetchCategoryCandidates(secConfig, cutoffMs) {
-  const rssResults = await Promise.all((secConfig.feeds || []).map(fetchRssCandidates));
-  const naverResults = await fetchNaverNewsCandidates(secConfig.naverQuery);
-  const serpResults = await fetchSerpApiCandidates(secConfig.searchFocus);
-
-  const all = [...rssResults.flat(), ...naverResults, ...serpResults];
-
-  const withinWindow = all.filter(c => Number.isFinite(c.pubMs) && c.pubMs >= cutoffMs);
-  const dropped = all.length - withinWindow.length;
-  if (dropped > 0) {
-    console.log(`  · [${secConfig.category}] 게재시각 미확인/48시간 초과로 후보 ${dropped}건 제외 (전체 수집 ${all.length}건)`);
+// 💡 뉴스 항목 검증 (비동기): (1) source가 화이트리스트에 있는가
+// (2) 원 언론사 도메인에서 직접 검색됐거나, (3) 포털(네이버/다음) 경유라면 페이지 내용에서 해당 언론사 표기가 실제로 확인되는가
+async function validateNewsItem(item, supportingTargets) {
+  if (!item?.text || !item?.source) {
+    return { ok: false, reason: 'missing_field' };
   }
 
-  const deduped = dedupeCandidates(withinWindow);
-  deduped.sort((a, b) => b.pubMs - a.pubMs);
-  return deduped.slice(0, 40); // 프롬프트 크기 제어용 상한
+  const allowedDomains = TRUSTED_DOMAINS[item.source];
+  if (!allowedDomains) {
+    return { ok: false, reason: 'unknown_outlet' };
+  }
+
+  if (!supportingTargets || supportingTargets.length === 0) {
+    return { ok: false, reason: 'no_grounding_support' };
+  }
+
+  // (2) 원 언론사 도메인과 직접 일치
+  const directMatch = supportingTargets.some(t =>
+    allowedDomains.some(ad => t.domain === ad || t.domain.endsWith(`.${ad}`))
+  );
+  if (directMatch) return { ok: true, via: 'direct_domain' };
+
+  // (3) 포털 경유 — 실제 페이지 내용에서 언론사 표기를 확인
+  const aggregatorTargets = supportingTargets.filter(t => isAggregatorDomain(t.domain));
+  for (const t of aggregatorTargets) {
+    const hints = await fetchPageOutletHints(t.url);
+    if (!hints) continue;
+    const mentionsOutlet =
+      hints.includes(item.source) ||
+      allowedDomains.some(ad => hints.includes(ad));
+    if (mentionsOutlet) return { ok: true, via: 'aggregator_content_check' };
+  }
+
+  return { ok: false, reason: 'source_domain_mismatch' };
 }
 
 // 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
@@ -629,94 +556,97 @@ async function fetchMarketData(dateInfo) {
   return results;
 }
 
-// 6. [간추린 뉴스] 단일 섹션: RSS/네이버API/SerpAPI로 확보한 "실제 기사" 중에서 Gemini가 고르고 요약만 한다
-const newsPickSchema = {
-  type: Type.OBJECT,
-  properties: {
-    picks: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          index: { type: Type.INTEGER, description: '후보 목록에서 선택한 기사의 번호' },
-          text: { type: Type.STRING, description: '해당 기사의 한국어 한 문장 요약 (명사형 종결)' }
-        },
-        required: ['index', 'text']
-      }
-    }
-  },
-  required: ['picks']
-};
-
+// 6. [간추린 뉴스] 단일 섹션 팩트 검색 (그라운딩 검증 포함)
 async function generateSingleNewsSection(secConfig, dateInfo) {
-  const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
-  const candidates = await fetchCategoryCandidates(secConfig, cutoffMs);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+  const kstFormatter = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short'
+  });
 
-  if (candidates.length === 0) {
-    console.warn(`  ⚠️ [${secConfig.category}] 48시간 이내 후보 기사가 0건입니다 (RSS/네이버/SerpAPI 전부 확인). 빈 섹션으로 발행됩니다.`);
-    return { id: secConfig.id, category: secConfig.category, icon: secConfig.icon, items: [] };
-  }
-
-  const candidateListText = candidates
-    .map((c, i) => `${i}. [${c.source}] ${c.title} (${c.pubDate || '시각 미상'})`)
-    .join('\n');
+  const trustedOutletList = Object.keys(TRUSTED_DOMAINS).join(', ');
 
   const prompt = `
-당신은 아래 "실제로 수집된 후보 기사 목록"에서만 골라 뉴스를 정리하는 에디터입니다.
-이 목록은 RSS/뉴스 API로 이미 실제 존재가 확인된 기사들이며, 목록에 없는 사실을 추가하거나 지어내는 것은 절대 금지합니다.
+당신은 사실(Fact) 검증을 최우선으로 하는 전문 뉴스 에디터입니다. 반드시 Google Search 도구로 실제 검색되는 기사만 근거로 삼으십시오. 절대 기억이나 추정으로 기사를 지어내지 마십시오.
 
-[분야]: ${secConfig.category}
-[오늘 날짜(KST)]: ${dateInfo.isoDate}
+[시간 제약 - 엄격 준수]
+- 현재 기준 시각: ${kstFormatter.format(now)} (KST)
+- 채택 가능 기사 게재 시각: ${kstFormatter.format(cutoff)} 이후 (최근 48시간 이내)
+- 검색 결과에서 게재 시각을 확인할 수 없는 기사는 사용하지 마십시오.
+- 48시간보다 오래된 기사이거나, 검증되지 않는 내용은 절대 포함하지 마십시오.
+- 검증 가능한 기사가 5개 미만이면 억지로 5개를 채우지 말고, 확보된 개수만 반환하십시오. 개수를 채우기 위한 추측·각색·재구성은 금지합니다.
 
-[후보 기사 목록] (번호. [언론사] 제목 (게재시각))
-${candidateListText}
+[검색 타깃 분야]: ${secConfig.category}
+[검색 키워드 힌트]: "${secConfig.searchFocus}", "${dateInfo.isoDate}"
 
-[작업 지시]
-1. 위 목록 중 "${secConfig.category}" 분야에서 가장 중요하고 대표성 있는 기사를 최대 5개 선택하십시오. 관련성 높은 기사가 5개 미만이면 억지로 채우지 말고 있는 만큼만 선택하십시오.
-2. 각 기사를 한국어 한 문장으로 요약하되, 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성하십시오 (~함, ~임 종결 금지).
-3. 목록에 있는 제목이 전달하는 사실 범위를 벗어나는 내용(원인 추정, 배경 설명 등)을 덧붙이지 마십시오.
-4. source나 url은 적지 마십시오 — 이미 후보 목록에서 확정되어 있으므로 선택한 기사의 번호(index)만 알려주면 됩니다.
+[source 표기 규칙 - 중요]
+source에는 실제 검색된 기사가 게재된 언론사명을 아래 목록에 있는 표기와 정확히 동일하게 적으십시오 (다른 표기, 축약, 오타 금지):
+${trustedOutletList}
+위 목록에 있는 언론사가 검색되지 않았다면 그 사실 자체를 다른 언론사로 대체하지 말고, 검증 가능한 기사만 남기십시오.
 
-반드시 아래 JSON 형식으로만 응답하세요:
-{ "picks": [ { "index": 0, "text": "요약 문장" } ] }`;
+[항목별 필수 필드]
+1. text: 팩트 뉴스 요약 문장. 명사/명사형 종결(~발표, ~기록, ~추진, ~논란, ~승리, ~전망 등)로 간결하게 작성 (~함, ~임 종결 금지)
+2. source: 위 목록 중 실제로 검색된 언론사명 (목록 표기와 정확히 일치)
+
+[스포츠 섹션 예외]: 지정 선수의 당일 경기 소식이 없으면 KBO, EPL, 국내 골프 등 오늘자 가장 뜨거운 스포츠 팩트 기사로 대체하되, 위 시간/검증 제약은 동일하게 적용할 것.
+
+반드시 아래 JSON 형식으로만 응답하세요 (다른 설명 금지):
+\`\`\`json
+{
+  "id": "${secConfig.id}",
+  "category": "${secConfig.category}",
+  "icon": "${secConfig.icon}",
+  "items": [
+    { "text": "팩트 뉴스 요약 문장", "source": "실제 언론사명" }
+  ]
+}
+\`\`\``;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: {
       temperature: 0.0,
-      responseMimeType: 'application/json',
-      responseSchema: newsPickSchema
+      tools: [{ googleSearch: {} }]
     }
   });
 
   const parsed = extractJson(response.text);
-  const picks = Array.isArray(parsed.picks) ? parsed.picks : [];
 
-  const seen = new Set();
-  const items = [];
-  const invalidPicks = [];
-  for (const p of picks) {
-    const idx = p?.index;
-    if (typeof idx !== 'number' || !candidates[idx] || seen.has(idx)) {
-      invalidPicks.push(p);
-      continue;
-    }
-    seen.add(idx);
-    items.push({
-      text: (p.text || candidates[idx].title || '').trim(),
-      // ⚠️ source는 모델이 적은 값이 아니라, 우리가 직접 수집한 후보 데이터에서 채운다 (hallucination 원천 차단)
-      source: candidates[idx].source
+  // 리다이렉트 프록시 링크를 실제 {url, domain}으로 해석 (섹션당 grounding 청크 수만큼 네트워크 요청)
+  const resolvedChunkTargets = await resolveGroundingChunkTargets(response);
+
+  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+  const checked = await Promise.all(rawItems.map(async item => {
+    const { targets, precise } = getSupportingTargets(response, resolvedChunkTargets, item?.text);
+    const result = await validateNewsItem(item, targets);
+    return { item, result, precise, targets };
+  }));
+  const accepted = checked.filter(c => c.result.ok).map(c => c.item);
+  const rejected = checked.filter(c => !c.result.ok);
+
+  if (rejected.length > 0) {
+    console.warn(`  ⚠️ [${secConfig.category}] ${rejected.length}건 검증 실패로 제외:`);
+    rejected.forEach(r => {
+      const preview = (r.item?.text || '(텍스트 없음)').slice(0, 40);
+      const mode = r.precise ? '문장단위' : '섹션전체(완화)';
+      const src = r.item?.source || '(source 없음)';
+      const resolvedDomains = (r.targets || []).map(t => t.domain).join(', ') || '(없음)';
+      console.warn(`     - [${src}] "${preview}..." → 사유: ${r.result.reason} [${mode}] | 실제 해석된 도메인: ${resolvedDomains}`);
     });
-    if (items.length >= 5) break;
   }
 
-  if (invalidPicks.length > 0) {
-    console.warn(`  ⚠️ [${secConfig.category}] 존재하지 않는 index를 반환한 pick ${invalidPicks.length}건 무시`);
+  if (accepted.length === 0) {
+    console.warn(`  ⚠️ [${secConfig.category}] 검증을 통과한 기사가 0건입니다. 이번 회차는 해당 섹션이 빈 상태로 발행됩니다.`);
   }
-  console.log(`  ✓ [완료] ${secConfig.category} (후보 ${candidates.length}건 중 ${items.length}건 채택)`);
 
-  return { id: secConfig.id, category: secConfig.category, icon: secConfig.icon, items };
+  return {
+    id: parsed.id || secConfig.id,
+    category: parsed.category || secConfig.category,
+    icon: parsed.icon || secConfig.icon,
+    // 최종 저장 포맷은 기존과 동일하게 text/source만 유지
+    items: accepted.map(({ text, source }) => ({ text, source }))
+  };
 }
 
 // 7. [간추린 뉴스] 날씨 및 메타 요약
@@ -869,18 +799,24 @@ async function publishBriefing(categoryType, targetDateStr) {
   try {
     let parsedData = null;
 
-    // 💡 A. [간추린 뉴스] 청크 분할 병렬 처리 (4개씩 2묶음) — RSS/네이버API/SerpAPI로 확보한 실제 기사 중에서 선별
+    // 💡 A. [간추린 뉴스] 청크 분할 병렬 검색 (4개씩 2묶음) + 그라운딩 검증
     if (isNews) {
-      console.log(`🔍 8대 분야 RSS/네이버API/SerpAPI 후보 수집 및 선별 가동 중... (48시간 이내, 실제 확인된 기사만 채택)`);
+      console.log(`🔍 8대 분야 개별 Google Search 병렬 검색 가동 중... (48시간 이내 검증된 기사만 채택)`);
       const chunk1 = NEWS_SECTIONS_CONFIG.slice(0, 4);
       const chunk2 = NEWS_SECTIONS_CONFIG.slice(4, 8);
 
-      const res1 = await Promise.all(chunk1.map(cfg => generateSingleNewsSection(cfg, dateInfo)));
-      const res2 = await Promise.all(chunk2.map(cfg => generateSingleNewsSection(cfg, dateInfo)));
+      const runSection = async (cfg) => {
+        const res = await generateSingleNewsSection(cfg, dateInfo);
+        console.log(`  ✓ [완료] ${cfg.category} (검증 통과 ${res.items.length}건)`);
+        return res;
+      };
+
+      const res1 = await Promise.all(chunk1.map(runSection));
+      const res2 = await Promise.all(chunk2.map(runSection));
       const generatedSections = [...res1, ...res2];
 
       const totalItems = generatedSections.reduce((sum, s) => sum + s.items.length, 0);
-      console.log(`📊 전체 채택 기사 수: ${totalItems}건`);
+      console.log(`📊 전체 검증 통과 기사 수: ${totalItems}건`);
 
       console.log(`🌤️ 전국 날씨 및 3대 핵심 하이라이트 요약 중...`);
       const metaData = await generateNewsMeta(dateInfo, generatedSections);
