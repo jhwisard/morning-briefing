@@ -4,7 +4,7 @@ on:
   schedule:
     # 💡 UTC 22:00 = KST 다음날 07:00
     # 월~금 평일 실행: '0 22 * * 0-4' (매일 실행하려면 '0 22 * * *' 사용)
-    - cron: '0 22 * * *'
+    - cron: '40 23 * * *'
   workflow_dispatch:
     inputs:
       category:
