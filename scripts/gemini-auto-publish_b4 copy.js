@@ -33,6 +33,9 @@ const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID?.trim();
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET?.trim();
 const SERPAPI_KEY = process.env.SERPAPI_KEY?.trim();
 
+const KIS_APP_KEY = process.env.KIS_APP_KEY?.trim();
+const KIS_APP_SECRET = process.env.KIS_APP_SECRET?.trim();
+
 // 1. 환경 변수 검증
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
 let rawUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/^["']|["']$/g, '');
@@ -573,6 +576,96 @@ async function fetchCategoryCandidates(secConfig, cutoffMs) {
   return deduped.slice(0, 40); // 프롬프트 크기 제어용 상한
 }
 
+// 💡 KIS 한국투자증권 Open API 데이터 수집 (코스피/코스닥/수급, 업종, 순매수 상위)
+async function fetchKisMarketData() {
+  if (!KIS_APP_KEY || !KIS_APP_SECRET) {
+    console.warn('  ⚠️ KIS_APP_KEY / KIS_APP_SECRET 누락으로 KIS 데이터 수집을 스킵합니다.');
+    return null;
+  }
+
+  try {
+    console.log(`📈 [KIS API] 국내 증시(코스피/코스닥/수급, 업종, 매수상위) 실제 데이터 수집 중...`);
+    const KIS_BASE_URL = 'https://openapi.koreainvestment.com:9443';
+
+    // 1. 토큰 발급
+    const tokenRes = await fetch(`${KIS_BASE_URL}/oauth2/tokenP`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'client_credentials',
+        appkey: KIS_APP_KEY,
+        appsecret: KIS_APP_SECRET
+      })
+    });
+    const tokenJson = await tokenRes.json();
+    const token = tokenJson.access_token;
+    if (!token) throw new Error('KIS 토큰 발급 실패');
+
+    const headers = {
+      'Content-Type': 'application/json',
+      authorization: `Bearer ${token}`,
+      appkey: KIS_APP_KEY,
+      appsecret: KIS_APP_SECRET,
+      custtype: 'P'
+    };
+
+    // 2. [sec_5] 코스피/코스닥 지수 및 수급
+    const getIndex = async (iscd) => {
+      const p = new URLSearchParams({ FID_COND_MRKT_DIV_CODE: 'U', FID_COND_SCR_DIV_CODE: '20171', FID_INPUT_ISCD: iscd });
+      const res = await fetch(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-index-price?${p}`, {
+        headers: { ...headers, tr_id: 'FHPUP02100000' }
+      });
+      const data = await res.json();
+      return data.output || {};
+    };
+    const kospi = await getIndex('0001');
+    const kosdaq = await getIndex('1001');
+
+    // 3. [sec_6] 업종별 시세
+    const sectorP = new URLSearchParams({
+      FID_COND_MRKT_DIV_CODE: 'U',
+      FID_COND_SCR_DIV_CODE: '20174',
+      FID_INPUT_ISCD: '0001',
+      FID_MRKT_CLS_CODE: 'K',
+      FID_BLNG_CLS_CODE: '0'
+    });
+    const sectorRes = await fetch(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-index-category-price?${sectorP}`, {
+      headers: { ...headers, tr_id: 'FHPUP02140000' }
+    });
+    const sectorJson = await sectorRes.json();
+    const sectorList = sectorJson.output2 || [];
+    const topSectors = sectorList.slice(0, 3).map(s => `${s.hts_kor_isnm}(+${s.bstp_nmix_prdy_ctrt}%)`).join(', ');
+    const bottomSectors = sectorList.slice(-3).reverse().map(s => `${s.hts_kor_isnm}(${s.bstp_nmix_prdy_ctrt}%)`).join(', ');
+
+    // 4. [sec_7] 외인 순매수 상위 종목
+    const netBuyP = new URLSearchParams({
+      FID_COND_MRKT_DIV_CODE: 'J',
+      FID_COND_SCR_DIV_CODE: '16449',
+      FID_INPUT_ISCD: '0000',
+      FID_DIV_CLS_CODE: '0',
+      FID_RANK_SORT_CLS_CODE: '0',
+      FID_ETC_CLS_CODE: '0'
+    });
+    const netBuyRes = await fetch(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-investor-netbuy-ranking?${netBuyP}`, {
+      headers: { ...headers, tr_id: 'FHPST01740000' }
+    });
+    const netBuyJson = await netBuyRes.json();
+    const topForeign = (netBuyJson.output || []).slice(0, 3).map(i => i.hts_kor_isnm).join(', ');
+
+    console.log(`  ✓ 코스피: ${kospi.bstp_nmix_prpr} (${kospi.bstp_nmix_prdy_ctrt}%) | 코스닥: ${kosdaq.bstp_nmix_prpr} (${kosdaq.bstp_nmix_prdy_ctrt}%)`);
+    return {
+      kospi: { price: parseFloat(kospi.bstp_nmix_prpr || 0).toLocaleString(), change: `${parseFloat(kospi.bstp_nmix_prdy_ctrt || 0) > 0 ? '+' : ''}${kospi.bstp_nmix_prdy_ctrt}%` },
+      kosdaq: { price: parseFloat(kosdaq.bstp_nmix_prpr || 0).toLocaleString(), change: `${parseFloat(kosdaq.bstp_nmix_prdy_ctrt || 0) > 0 ? '+' : ''}${kosdaq.bstp_nmix_prdy_ctrt}%` },
+      topSectors,
+      bottomSectors,
+      topForeign
+    };
+  } catch (err) {
+    console.warn('  ⚠️ KIS 데이터 수집 중 오류:', err.message);
+    return null;
+  }
+}
+
 // 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
 async function fetchMarketData(dateInfo) {
   console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 및 등락률 수집 중...`);
@@ -584,9 +677,15 @@ async function fetchMarketData(dateInfo) {
     russell: '^RUT',
     sox: '^SOX',
     ewy: 'EWY',
-    usdkrw: 'KRW=X'
+    usdkrw: 'KRW=X',
+    // 💡 원자재 선물 추가 (sec_8)
+    wti: 'CL=F',
+    gold: 'GC=F',
+    copper: 'HG=F',
+    natgas: 'NG=F',
+    dxy: 'DX-Y.NYB'
   };
-
+  
   const results = {};
 
   for (const [key, symbol] of Object.entries(tickers)) {
@@ -772,55 +871,38 @@ ${sampleHeadlines}
   return extractJson(response.text);
 }
 
-// 8. [주식 모닝 브리핑] 시스템 프롬프트 (Yahoo Finance 수치 연동)
-function getStockSystemPrompt(dateInfo, marketData) {
+// 8. [주식 모닝 브리핑] 9대 섹션 시스템 프롬프트 (Yahoo Finance + KIS API 팩트 기반)
+function getStockSystemPrompt(dateInfo, marketData, kisData) {
   const isWeekend = dateInfo.isWeekendClosed;
   const weekendTag = isWeekend ? '[직전 거래일 마감] ' : '';
 
   return `
 당신은 매일 개장 전 글로벌 및 국내 증시 핵심 현황을 분석·전달하는 주식 시장 전문 애널리스트입니다.
-아래 제공된 [Yahoo Finance 실시간 실제 마감 수치]를 100% 그대로 활용하여 1번 섹션을 완성하고, Google Search로 확인된 최신 증시 뉴스를 분석하여 브리핑을 작성하세요.
+아래 제공된 [실제 팩트 시세 데이터]를 100% 그대로 활용하여 각 섹션을 완성하고, Google Search로 확인된 최신 증시 뉴스를 분석하여 9대 섹션 [주식 모닝 브리핑] JSON 데이터를 작성하세요.
 
-[Yahoo Finance 실시간 실제 수치 (수치 절대 임의 변경 금지)]:
-- 다우존스: ${marketData.dow.price} (${marketData.dow.change})
-- S&P 500: ${marketData.sp500.price} (${marketData.sp500.change})
-- 나스닥: ${marketData.nasdaq.price} (${marketData.nasdaq.change})
-- 러셀 2000: ${marketData.russell.price} (${marketData.russell.change})
-- 필라델피아 반도체: ${marketData.sox.price} (${marketData.sox.change})
-- MSCI 한국 지수 ETF(EWY): ${marketData.ewy.price} (${marketData.ewy.change})
-- NDF 역외환율(원/달러): ${marketData.usdkrw.price}원 (${marketData.usdkrw.change})
+[실시간 확정 데이터 (수치 임의 변경 절대 금지)]:
+- 해외지수: 다우 ${marketData.dow.price}(${marketData.dow.change}), S&P500 ${marketData.sp500.price}(${marketData.sp500.change}), 나스닥 ${marketData.nasdaq.price}(${marketData.nasdaq.change}), 러셀2000 ${marketData.russell.price}(${marketData.russell.change}), 반도체 ${marketData.sox.price}(${marketData.sox.change}), EWY ${marketData.ewy.price}(${marketData.ewy.change}), 원/달러 ${marketData.usdkrw.price}원(${marketData.usdkrw.change})
+- 원자재/통화: WTI유 ${marketData.wti.price}(${marketData.wti.change}), 금 ${marketData.gold.price}(${marketData.gold.change}), 구리 ${marketData.copper.price}(${marketData.copper.change}), 천연가스 ${marketData.natgas.price}(${marketData.natgas.change}), 달러인덱스 ${marketData.dxy.price}(${marketData.dxy.change})
+${kisData ? `- 국내시장(KIS): 코스피 ${kisData.kospi.price}(${kisData.kospi.change}), 코스닥 ${kisData.kosdaq.price}(${kisData.kosdaq.change}) | 주도업종: ${kisData.topSectors} | 외인순매수상위: ${kisData.topForeign}` : ''}
 
 [작성 규칙]
 1. 제목: "${dateInfo.titleStock}"
 2. 문체 규칙: 문장 종결은 반드시 "~함", "~임", "~있음", "~없음" 스타일로 간결하게 끝낼 것. JSON 내부 작은따옴표(') 사용.
-3. weather 필드: 위 실제 3대 지수 실제 등락률 및 장 분위기 한 줄 요약.
+3. weather 필드: 위 실제 지수 등락률 및 장 분위기 한 줄 요약.
 4. highlights 필드: 당일 핵심 포인트 3개 (~함/임 종결).
-5. 4대 섹션 구성 (순서 고정):
-   - 섹션 1 (id: "sec_1", category: "1. 해외 증시 마감 현황", icon: "TrendingUp", items: 7개):
-     위 제공된 7개 실제 수치와 등락률을 그대로 넣고, 마감 원인을 1줄 작성할 것.
-     형식 예: "{지수명}: {수치} ({등락률}) - ${weekendTag}{핵심 원인 한 줄}"
-     * source: "다우", "S&P500", "나스닥", "러셀 2000", "필라델피아 반도체", "한국물", "선물"
-   - 섹션 2 (id: "sec_2", category: "2. 오늘의 증시 키워드", icon: "TrendingUp", items: 4개): 핵심 테마/이슈 4가지 (source: "핵심 키워드")
-   - 섹션 3 (id: "sec_3", category: "3. 주요 주식 뉴스", icon: "TrendingUp", items: 4개):
-     공신력 있는 주요 언론(로이터, 블룸버그, 연합뉴스, 한국경제, WSJ 등)의 팩트 뉴스 4개. "[헤드라인]: 설명" (source: 실제 언론사명)
-   - 섹션 4 (id: "sec_4", category: "4. 국내 증시 투자 전략", icon: "TrendingUp", items: 4개):
-     [미국 증시 마감 총평], [국내 수급 영향], [당일 공략/주목 섹터], [실전 대응 전략] (source: "시황 분석")
+5. 9대 섹션 구성 (순서 고정):
+   - 섹션 1 (id: "sec_1", category: "1. 오늘의 증시 키워드", icon: "TrendingUp", items: 4개): 시장 마감 핵심 테마 4가지 (source: "핵심 키워드")
+   - 섹션 2 (id: "sec_2", category: "2. 해외 증시 마감 현황", icon: "TrendingUp", items: 7개): 다우, S&P500, 나스닥, 러셀2000, 반도체, EWY, NDF환율 확정 수치 + ${weekendTag}핵심 원인
+   - 섹션 3 (id: "sec_3", category: "3. 주요 주식 뉴스", icon: "TrendingUp", items: 4개): 공신력 있는 언론사의 핵심 뉴스 4개. "[헤드라인]: 설명" (source: 실제 언론사명)
+   - 섹션 4 (id: "sec_4", category: "4. PCE / 실적 딥다이브", icon: "TrendingUp", items: 3개): 물가 지표, 금리 전망, 빅테크 실적 정밀 분석 (source: "지표 분석")
+   - 섹션 5 (id: "sec_5", category: "5. 국내 증시 및 수급 현황", icon: "TrendingUp", items: 3개): 코스피/코스닥 지수 및 외인/기관 수급 동향 (source: "국내 수급")
+   - 섹션 6 (id: "sec_6", category: "6. 업종별 등락 및 주도 섹터", icon: "TrendingUp", items: 3개): 강세 및 약세 업종 분석 (source: "업종 시황")
+   - 섹션 7 (id: "sec_7", category: "7. 외국인 / 기관 매수 상위", icon: "TrendingUp", items: 3개): 외인/기관 순매수 집중 종목 및 시사점 (source: "수급 분석")
+   - 섹션 8 (id: "sec_8", category: "8. 원자재 및 환율 포지션", icon: "TrendingUp", items: 4개): WTI유, 금, 구리, 달러인덱스 확정 수치 및 시장 영향 (source: "원자재")
+   - 섹션 9 (id: "sec_9", category: "9. 당일 투자 전략 및 마무리 인사이트", icon: "TrendingUp", items: 4개): [국내 증시 영향], [당일 공략 섹터], [리스크 요인], [실전 대응 전략] (source: "전략 인사이트")
 
 [출력 포맷 규칙 - 엄격 준수]
-반드시 다른 설명 없이 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요:
-{
-  "title": "${dateInfo.titleStock}",
-  "weather": "마켓 분위기 한 줄 요약",
-  "highlights": ["포인트1", "포인트2", "포인트3"],
-  "sections": [
-    {
-      "id": "sec_1",
-      "category": "1. 해외 증시 마감 현황",
-      "icon": "TrendingUp",
-      "items": [{ "text": "...", "source": "..." }]
-    }
-  ]
-}
+반드시 다른 설명 없이 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요.
 `;
 }
 
