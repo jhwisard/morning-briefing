@@ -22,8 +22,13 @@ const KIS_APP_SECRET = process.env.KIS_APP_SECRET?.trim();
 
 let cachedToken = null;
 let cachedTokenExpiry = 0;
+// 💡 동시에 여러 함수(외국인매수/업종별/수급 등)가 한꺼번에 토큰을 요청해도
+// 실제 발급 요청은 딱 1번만 나가도록 "진행 중인 발급 요청"을 공유하는 락(lock) 역할
+let tokenFetchPromise = null;
 
-// ── 1. OAuth 접근토큰 발급 (well-documented, 표준 플로우) ─────────────────
+// ── 1. OAuth 접근토큰 발급 ────────────────────────────────────────────
+// ⚠️ KIS는 짧은 시간 내 동일 appkey로 반복 토큰 발급 시도 시 403으로 차단하는 정책이 있어서,
+// Promise.all()로 여러 함수를 동시에 호출해도 토큰 요청은 절대 중복 발사되지 않도록 직렬화함.
 async function getKisAccessToken() {
   if (cachedToken && Date.now() < cachedTokenExpiry) return cachedToken;
 
@@ -32,22 +37,38 @@ async function getKisAccessToken() {
     return null;
   }
 
-  const res = await fetch(`${KIS_BASE_URL}/oauth2/tokenP`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'client_credentials',
-      appkey: KIS_APP_KEY,
-      appsecret: KIS_APP_SECRET
-    })
-  });
+  // 이미 발급이 진행 중이면 새 요청을 또 보내지 않고 그 결과를 기다렸다가 재사용
+  if (tokenFetchPromise) return tokenFetchPromise;
 
-  if (!res.ok) throw new Error(`KIS 토큰 발급 실패: HTTP ${res.status}`);
-  const json = await res.json();
-  cachedToken = json.access_token;
-  // access_token_token_expired 필드가 있으면 그걸 쓰고, 없으면 안전하게 12시간으로 캐싱
-  cachedTokenExpiry = Date.now() + 12 * 60 * 60 * 1000;
-  return cachedToken;
+  tokenFetchPromise = (async () => {
+    try {
+      const res = await fetch(`${KIS_BASE_URL}/oauth2/tokenP`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'client_credentials',
+          appkey: KIS_APP_KEY,
+          appsecret: KIS_APP_SECRET
+        })
+      });
+
+      if (!res.ok) {
+        // 💡 실패 원인을 정확히 보려면 응답 본문(에러코드/설명)까지 같이 찍어야 함
+        const errBody = await res.text().catch(() => '(본문 읽기 실패)');
+        throw new Error(`KIS 토큰 발급 실패: HTTP ${res.status} - ${errBody}`);
+      }
+
+      const json = await res.json();
+      cachedToken = json.access_token;
+      cachedTokenExpiry = Date.now() + 12 * 60 * 60 * 1000;
+      return cachedToken;
+    } finally {
+      // 성공하든 실패하든 락은 풀어서 다음 호출(예: 다음 날 크론)이 다시 시도할 수 있게 함
+      tokenFetchPromise = null;
+    }
+  })();
+
+  return tokenFetchPromise;
 }
 
 // ── 2. 공통 GET 래퍼 ──────────────────────────────────────────────────
