@@ -72,7 +72,7 @@ const NEWS_SECTIONS_CONFIG = [
       { name: 'NYT', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml' },
       { name: '가디언', url: 'https://www.theguardian.com/us-news/rss' },
       { name: 'NPR', url: 'https://feeds.npr.org/1001/rss.xml' },
-      { name: 'CNBC', url: 'https://search.cnbc.com/rs/search/view.html?partnerId=2000&keywords=usa&f=1&categories=world&format=rss' }
+      { name: 'CNBC', url: 'https://www.cnbc.com/id/100003114/device/rss/rss.html' } // 파싱 에러 해결된 공식 메인 피드
     ]
   },
   {
@@ -80,9 +80,8 @@ const NEWS_SECTIONS_CONFIG = [
     searchFocus: '중국 대만 양안관계 뉴스', naverQuery: '중국 대만 양안관계',
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/asia/rss.xml' },
-      { name: 'SCMP', url: 'https://www.scmp.com/rss/91/feed' }, // 사우스차이나모닝포스트 (중화권 핵심)
-      { name: '포커스타이완', url: 'https://focustaiwan.tw/rss' }, // 대만 중앙통신사(CNA) 공식 영문 피드
-      { name: '타이베이타임스', url: 'https://www.taipeitimes.com/xml/index.rss' } // 확인 필요
+      { name: 'SCMP', url: 'https://www.scmp.com/rss/91/feed' },
+      { name: '타이베이타임스', url: 'https://www.taipeitimes.com/xml/index.rss' }
     ]
   },
   {
@@ -91,8 +90,7 @@ const NEWS_SECTIONS_CONFIG = [
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/rss.xml' },
       { name: '알자지라', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
-      { name: '키이우인디펜던트', url: 'https://kyivindependent.com/feed/' }, // 우크라이나 전황 최신 피드
-      { name: '타임스오브이스라엘', url: 'https://www.timesofisrael.com/feed/' } // 확인 필요
+      { name: '모스크바타임스', url: 'https://www.themoscowtimes.com/rss/news' } // 차단 없는 동유럽/러시아 독립 피드
     ]
   },
   {
@@ -101,25 +99,24 @@ const NEWS_SECTIONS_CONFIG = [
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/uk/rss.xml' },
       { name: '가디언', url: 'https://www.theguardian.com/world/europe-news/rss' },
-      { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all' }, // 확인 필요
-      { name: '프랑스24', url: 'https://www.france24.com/en/rss' } // 프랑스 주요 국제방송
+      { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all' },
+      { name: '프랑스24', url: 'https://www.france24.com/en/rss' }
     ]
   },
   {
     id: 'sec_5', category: '[日일본]', icon: 'Globe',
     searchFocus: '일본 정치 경제 사회 뉴스', naverQuery: '일본 정치 경제 사회',
     feeds: [
-      { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' }, // 확인 필요
-      { name: 'NHK', url: 'https://www3.nhk.or.jp/nhkworld/en/news/rss/news.xml' }, // NHK 월드 영문 공식 피드
-      { name: '교도뉴스', url: 'https://english.kyodonews.net/rss/news.xml' } // 일본 교도통신 공식 피드
+      { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' },
+      { name: '교도뉴스', url: 'https://english.kyodonews.net/list/feed/rss' } // 최신 RSS 엔드포인트
     ]
   },
   {
     id: 'sec_6', category: '[한국.정치.사회]', icon: 'Globe',
     searchFocus: '한국 정치 사회 주요 뉴스', naverQuery: '한국 정치 사회 정부 국회',
     feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/politics.xml' }, // 확인 필요
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/society.xml' }, // 확인 필요
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/politics.xml' },
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/society.xml' },
       { name: '동아일보', url: 'https://rss.donga.com/total.xml' },
       { name: '경향신문', url: 'https://www.khan.co.kr/rss/rssdata/total_news.xml' }
     ]
@@ -128,19 +125,17 @@ const NEWS_SECTIONS_CONFIG = [
     id: 'sec_7', category: '[한국.경제]', icon: 'TrendingUp',
     searchFocus: '한국 경제 금융 증시 뉴스', naverQuery: '한국 경제 금융 증시 부동산',
     feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' }, // 확인 필요
-      { name: '매일경제', url: 'https://www.mk.co.kr/rss/30100041/' }, // 매경 증권/경제
-      { name: '한국경제', url: 'https://www.hankyung.com/feed/economy' } // 한경 경제
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' },
+      { name: '매일경제', url: 'https://www.mk.co.kr/rss/30100041/' },
+      { name: '한국경제', url: 'https://www.hankyung.com/feed/all-news' } // 403 차단 없는 전체 뉴스 피드
     ]
   },
   {
     id: 'sec_8', category: '[스포츠:이정후.안세영.KLPGA.PBA]', icon: 'Sparkles',
-    // 💡 category(저장/표시용 라벨)는 형식을 그대로 유지하되, promptCategory로 Gemini에게 전달되는
-    // "분야" 해석 범위를 넓혀서 지정 선수 소식이 없는 날에도 국내외 스포츠 전반에서 채택할 수 있게 한다.
     promptCategory: '국내외 주요 스포츠 뉴스 전반 (야구·배드민턴·골프·당구 등 특정 종목에 국한하지 않음, 이정후/안세영/KLPGA/PBA 소식이 있으면 우선)',
     searchFocus: '한국 스포츠 야구 골프 배드민턴 뉴스', naverQuery: '프로야구 KBO 스포츠',
     feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' }, // 확인 필요
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' },
       { name: '동아일보', url: 'https://rss.donga.com/sports.xml' }
     ]
   }
