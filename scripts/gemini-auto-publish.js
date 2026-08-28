@@ -578,18 +578,31 @@ async function fetchCategoryCandidates(secConfig, cutoffMs) {
   return deduped.slice(0, 40); // 프롬프트 크기 제어용 상한
 }
 
-// 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수
+// 5. Yahoo Finance 실제 종가 및 등락률 정밀 계산 함수 (확장형)
 async function fetchMarketData(dateInfo) {
-  console.log(`📈 [Yahoo Finance] 7대 주요 지표 실제 시세 및 등락률 수집 중...`);
+  console.log(`📈 [Yahoo Finance] 글로벌 지수, 원자재, 국채금리, 핵심 빅테크 실제 시세 수집 중...`);
 
   const tickers = {
-    dow: '^DJI',
-    sp500: '^GSPC',
-    nasdaq: '^IXIC',
-    russell: '^RUT',
-    sox: '^SOX',
-    ewy: 'EWY',
-    usdkrw: 'KRW=X'
+    // ── 7대 주요 지수 및 환율 ──
+    dow: '^DJI',          // 다우존스
+    sp500: '^GSPC',       // S&P 500
+    nasdaq: '^IXIC',      // 나스닥
+    russell: '^RUT',      // 러셀 2000
+    sox: '^SOX',          // 필라델피아 반도체
+    ewy: 'EWY',           // MSCI 한국 ETF
+    usdkrw: 'KRW=X',      // 원/달러 환율
+
+    // ── 매크로 / 원자재 / 국채금리 ──
+    wti: 'CL=F',          // WTI 국제유가
+    gold: 'GC=F',         // 금 선물
+    copper: 'HG=F',       // 구리 선물 (경기 선행지표)
+    tnx: '^TNX',          // 미 10년물 국채금리
+
+    // ── 핵심 빅테크 / 모멘텀 종목 ──
+    nvda: 'NVDA',         // 엔비디아
+    aapl: 'AAPL',         // 애플
+    msft: 'MSFT',         // 마이크로소프트
+    tsla: 'TSLA'          // 테슬라
   };
 
   const results = {};
@@ -599,7 +612,7 @@ async function fetchMarketData(dateInfo) {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
       const res = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         }
       });
 
@@ -642,6 +655,7 @@ async function fetchMarketData(dateInfo) {
 
   console.log(`  ✓ 다우: ${results.dow.price} (${results.dow.change}) | S&P500: ${results.sp500.price} (${results.sp500.change}) | 나스닥: ${results.nasdaq.price} (${results.nasdaq.change})`);
   console.log(`  ✓ 반도체: ${results.sox.price} (${results.sox.change}) | EWY: ${results.ewy.price} (${results.ewy.change}) | 환율: ${results.usdkrw.price}원 (${results.usdkrw.change})`);
+  console.log(`  ✓ WTI유가: $${results.wti.price} (${results.wti.change}) | 10년물 금리: ${results.tnx.price}% (${results.tnx.change}) | 엔비디아: $${results.nvda.price} (${results.nvda.change})`);
 
   return results;
 }
@@ -812,41 +826,77 @@ ${sampleHeadlines}
   return extractJson(response.text);
 }
 
-// 8. [주식 모닝 브리핑] 시스템 프롬프트 (Yahoo Finance 수치 연동)
+// 8. [주식 모닝 브리핑] 시스템 프롬프트 (유튜브 시황 흐름 + 확정 수치 연동)
 function getStockSystemPrompt(dateInfo, marketData) {
   const isWeekend = dateInfo.isWeekendClosed;
   const weekendTag = isWeekend ? '[직전 거래일 마감] ' : '';
 
   return `
-당신은 매일 개장 전 글로벌 및 국내 증시 핵심 현황을 분석·전달하는 주식 시장 전문 애널리스트입니다.
-아래 제공된 [Yahoo Finance 실시간 실제 마감 수치]를 100% 그대로 활용하여 1번 섹션을 완성하고, Google Search로 확인된 최신 증시 뉴스를 분석하여 브리핑을 작성하세요.
+당신은 매일 아침 글로벌 매크로 지표, 빅테크 실적, 원자재 및 국내 수급을 정밀 분석하는 최고 수준의 증시 수석 애널리스트입니다.
+아래 제공된 [Yahoo Finance 실시간 실제 수치]를 100% 팩트로 활용하고, Google Search로 확인된 밤사이 최신 시황을 결합하여 브리핑을 작성하세요.
 
-[Yahoo Finance 실시간 실제 수치 (수치 절대 임의 변경 금지)]:
+[Yahoo Finance 실시간 실제 마감 수치 (수치 절대 임의 변경 금지)]:
 - 다우존스: ${marketData.dow.price} (${marketData.dow.change})
 - S&P 500: ${marketData.sp500.price} (${marketData.sp500.change})
 - 나스닥: ${marketData.nasdaq.price} (${marketData.nasdaq.change})
 - 러셀 2000: ${marketData.russell.price} (${marketData.russell.change})
 - 필라델피아 반도체: ${marketData.sox.price} (${marketData.sox.change})
 - MSCI 한국 지수 ETF(EWY): ${marketData.ewy.price} (${marketData.ewy.change})
-- NDF 역외환율(원/달러): ${marketData.usdkrw.price}원 (${marketData.usdkrw.change})
+- NDF 원/달러 역외환율: ${marketData.usdkrw.price}원 (${marketData.usdkrw.change})
+- WTI 국제유가: $${marketData.wti.price} (${marketData.wti.change})
+- 금 선물: $${marketData.gold.price} (${marketData.gold.change})
+- 구리 선물: $${marketData.copper.price} (${marketData.copper.change})
+- 미 10년물 국채금리: ${marketData.tnx.price}% (${marketData.tnx.change})
+- 핵심 빅테크 마감: 엔비디아(${marketData.nvda.change}), 애플(${marketData.aapl.change}), MS(${marketData.msft.change}), 테슬라(${marketData.tsla.change})
 
-[작성 규칙]
+---
+
+### [작성 및 환각 방지 규칙 - 엄격 준수]
 1. 제목: "${dateInfo.titleStock}"
-2. 문체 규칙: 문장 종결은 반드시 "~함", "~임", "~있음", "~없음" 스타일로 간결하게 끝낼 것. JSON 내부 작은따옴표(') 사용.
-3. weather 필드: 위 실제 3대 지수 실제 등락률 및 장 분위기 한 줄 요약.
-4. highlights 필드: 당일 핵심 포인트 3개 (~함/임 종결).
-5. 4대 섹션 구성 (순서 고정):
-   - 섹션 1 (id: "sec_1", category: "1. 해외 증시 마감 현황", icon: "TrendingUp", items: 7개):
-     위 제공된 7개 실제 수치와 등락률을 그대로 넣고, 마감 원인을 1줄 작성할 것.
-     형식 예: "{지수명}: {수치} ({등락률}) - ${weekendTag}{핵심 원인 한 줄}"
-     * source: "다우", "S&P500", "나스닥", "러셀 2000", "필라델피아 반도체", "한국물", "선물"
-   - 섹션 2 (id: "sec_2", category: "2. 오늘의 증시 키워드", icon: "TrendingUp", items: 4개): 핵심 테마/이슈 4가지 (source: "핵심 키워드")
-   - 섹션 3 (id: "sec_3", category: "3. 주요 주식 뉴스", icon: "TrendingUp", items: 4개):
-     공신력 있는 주요 언론(로이터, 블룸버그, 연합뉴스, 한국경제, WSJ 등)의 팩트 뉴스 4개. "[헤드라인]: 설명" (source: 실제 언론사명)
-   - 섹션 4 (id: "sec_4", category: "4. 국내 증시 투자 전략", icon: "TrendingUp", items: 4개):
-     [미국 증시 마감 총평], [국내 수급 영향], [당일 공략/주목 섹터], [실전 대응 전략] (source: "시황 분석")
+2. 문체 규칙: 문장 종결은 반드시 "~함.", "~임.", "~있음.", "~없음.", "~기록함.", "~상회함.", "~하회함.", "~부합함." 스타일의 간결한 개조식 서술형으로 끝맺을 것.
+3. weather 필드: 3대 지수 실제 등락률 및 글로벌 장 분위기 1줄 요약.
+4. highlights 필드: 당일 핵심 체크포인트 3개 (~함/임 종결).
+5. [수치 날조 금지]: 지수, 환율, 유가, 빅테크 등락률은 반드시 위 제공된 실제 수치를 그대로 인용할 것.
+6. [경제 지표 및 실적 팩트 체크]:
+   - 당일 밤사이 공식 발표된 지표(PCE, CPI, 고용 등)나 실적이 있을 경우에만 [발표치 vs 예상치] 수치를 명시할 것.
+   - 발표가 없는 날은 절대 과거 수치를 지어내지 말고, [직전 발표 지표 영향] 또는 [향후 발표 예정 일정 및 컨센서스]로 대체할 것.
 
-[출력 포맷 규칙 - 엄격 준수]
+---
+
+### [5대 고정 섹션 구성]
+
+- **섹션 1 (id: "sec_1", category: "1. 오늘의 증시 키워드", icon: "Key", items: 4개)**:
+  * 당일 장을 관통하는 4대 핵심 테마 요약 (1. 거시지표 결과/일정, 2. 빅테크 실적/이슈, 3. 외국인·기관 수급 반응, 4. 주도/순환매 섹터)
+  * 형식 예: "7월 PCE: 예상치 소폭 상회했으나, 근원 수치는 시장 예상에 부합함."
+  * 형식 예: "주도 테마: 반도체 조정 속 화장품·제약·방산 섹터 순환매 부각됨."
+  * source: "증시 키워드"
+
+- **섹션 2 (id: "sec_2", category: "2. 글로벌 증시 및 원자재 마감", icon: "TrendingUp", items: 7개)**:
+  * 위 제공된 실제 수치(다우, S&P500, 나스닥, 반도체, 한국물, 원/달러, 유가/금리)와 ${weekendTag}핵심 원인을 1줄 결합.
+  * 형식: "{지표명}: {수치} ({등락률}) - {마감 핵심 원인 한 줄}"
+  * source: "다우", "S&P500", "나스닥", "반도체", "한국물(EWY)", "환율", "원자재/금리"
+
+- **섹션 3 (id: "sec_3", category: "3. 주요 경제지표 & 글로벌 뉴스", icon: "BarChart3", items: 4개)**:
+  * 경제 지표 발표 결과(발표치/예상치), 지정학/유가 동향, 글로벌 정책/규제 뉴스 4개.
+  * 형식: "[헤드라인]: {구체적 팩트 및 시장 영향 요약}"
+  * source: 실제 언론사명 (로이터, 블룸버그, 연합인포맥스, WSJ 등)
+
+- **섹션 4 (id: "sec_4", category: "4. 미 증시 주요 특징주 동향", icon: "Zap", items: 4개)**:
+  * 엔비디아, 애플, 테슬라 등 당일 뚜렷한 주가 움직임이나 모멘텀이 있었던 4개 종목의 원인 분석.
+  * 형식: "[종목명]: {주가 움직임 및 상승/하락 핵심 요인}"
+  * source: "특징주"
+
+- **섹션 5 (id: "sec_5", category: "5. 국내 증시 수급 및 실전 투자 전략", icon: "Compass", items: 4개)**:
+  * 4대 전략 항목 작성:
+    1. [미 증시 마감 총평 및 환율 영향]
+    2. [코스피 거래대금 및 지지·저항선 점검]
+    3. [당일 장 시작 전 공략/주목 유망 섹터]
+    4. [단기/스윙 투자자를 위한 실전 대응 전략]
+  * source: "투자 전략"
+
+---
+
+### [출력 포맷 규칙 - 엄격 준수]
 반드시 다른 설명 없이 JSON 구조의 \`\`\`json ... \`\`\` 블록으로만 응답하세요:
 {
   "title": "${dateInfo.titleStock}",
@@ -855,9 +905,9 @@ function getStockSystemPrompt(dateInfo, marketData) {
   "sections": [
     {
       "id": "sec_1",
-      "category": "1. 해외 증시 마감 현황",
-      "icon": "TrendingUp",
-      "items": [{ "text": "...", "source": "..." }]
+      "category": "1. 오늘의 증시 키워드",
+      "icon": "Key",
+      "items": [{ "text": "...", "source": "증시 키워드" }]
     }
   ]
 }
@@ -948,11 +998,13 @@ async function publishBriefing(categoryType, targetDateStr) {
         sections: generatedSections
       };
     }
-    // 💡 B. [주식 모닝 브리핑] Yahoo Finance 실시간 수치 확정 + 시황 분석
+    // 💡 B. [주식 모닝 브리핑] Yahoo Finance 실시간 수치 확정 + 시황 분석 (5대 섹션 연동)
     else if (isStock) {
       const marketData = await fetchMarketData(dateInfo);
 
-      const userPrompt = `제공된 Yahoo Finance 실제 지수 수치를 바탕으로 섹션 1을 완성하고, 오늘(${dateInfo.isoDate}) 기준 밤사이 마감된 글로벌 시황과 로이터/블룸버그/연합뉴스 증시 헤드라인을 Google Search로 검색하여 [주식 모닝 브리핑] JSON 데이터를 작성하세요.`;
+      const userPrompt = `
+오늘(${dateInfo.isoDate}) 기준 밤사이 마감된 글로벌 증시 마감 원인, 공식 발표된 주요 경제지표 결과(PCE/CPI/고용 등), 메가테크 실적 및 주요 특징주 이슈를 Google Search로 검색하십시오.
+제공된 [Yahoo Finance 실제 수치]를 섹션 2에 100% 그대로 반영하고, 검색된 팩트를 바탕으로 5대 섹션의 [주식 모닝 브리핑] JSON 데이터를 작성하십시오.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
