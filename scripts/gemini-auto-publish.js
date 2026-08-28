@@ -71,7 +71,8 @@ const NEWS_SECTIONS_CONFIG = [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml' },
       { name: 'NYT', url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml' },
       { name: '가디언', url: 'https://www.theguardian.com/us-news/rss' },
-      { name: 'NPR', url: 'https://feeds.npr.org/1001/rss.xml' }
+      { name: 'NPR', url: 'https://feeds.npr.org/1001/rss.xml' },
+      { name: 'CNBC', url: 'https://search.cnbc.com/rs/search/view.html?partnerId=2000&keywords=usa&f=1&categories=world&format=rss' }
     ]
   },
   {
@@ -79,6 +80,8 @@ const NEWS_SECTIONS_CONFIG = [
     searchFocus: '중국 대만 양안관계 뉴스', naverQuery: '중국 대만 양안관계',
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/asia/rss.xml' },
+      { name: 'SCMP', url: 'https://www.scmp.com/rss/91/feed' }, // 사우스차이나모닝포스트 (중화권 핵심)
+      { name: '포커스타이완', url: 'https://focustaiwan.tw/rss' }, // 대만 중앙통신사(CNA) 공식 영문 피드
       { name: '타이베이타임스', url: 'https://www.taipeitimes.com/xml/index.rss' } // 확인 필요
     ]
   },
@@ -88,6 +91,7 @@ const NEWS_SECTIONS_CONFIG = [
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/rss.xml' },
       { name: '알자지라', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
+      { name: '키이우인디펜던트', url: 'https://kyivindependent.com/feed/' }, // 우크라이나 전황 최신 피드
       { name: '타임스오브이스라엘', url: 'https://www.timesofisrael.com/feed/' } // 확인 필요
     ]
   },
@@ -97,7 +101,8 @@ const NEWS_SECTIONS_CONFIG = [
     feeds: [
       { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/uk/rss.xml' },
       { name: '가디언', url: 'https://www.theguardian.com/world/europe-news/rss' },
-      { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all' } // 확인 필요
+      { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all' }, // 확인 필요
+      { name: '프랑스24', url: 'https://www.france24.com/en/rss' } // 프랑스 주요 국제방송
     ]
   },
   {
@@ -105,7 +110,8 @@ const NEWS_SECTIONS_CONFIG = [
     searchFocus: '일본 정치 경제 사회 뉴스', naverQuery: '일본 정치 경제 사회',
     feeds: [
       { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' }, // 확인 필요
-      { name: 'BBC', url: 'http://feeds.bbci.co.uk/news/world/asia/rss.xml' }
+      { name: 'NHK', url: 'https://www3.nhk.or.jp/nhkworld/en/news/rss/news.xml' }, // NHK 월드 영문 공식 피드
+      { name: '교도뉴스', url: 'https://english.kyodonews.net/rss/news.xml' } // 일본 교도통신 공식 피드
     ]
   },
   {
@@ -113,14 +119,18 @@ const NEWS_SECTIONS_CONFIG = [
     searchFocus: '한국 정치 사회 주요 뉴스', naverQuery: '한국 정치 사회 정부 국회',
     feeds: [
       { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/politics.xml' }, // 확인 필요
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/society.xml' } // 확인 필요
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/society.xml' }, // 확인 필요
+      { name: '동아일보', url: 'https://rss.donga.com/total.xml' },
+      { name: '경향신문', url: 'https://www.khan.co.kr/rss/rssdata/total_news.xml' }
     ]
   },
   {
     id: 'sec_7', category: '[한국.경제]', icon: 'TrendingUp',
     searchFocus: '한국 경제 금융 증시 뉴스', naverQuery: '한국 경제 금융 증시 부동산',
     feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' } // 확인 필요
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' }, // 확인 필요
+      { name: '매일경제', url: 'https://www.mk.co.kr/rss/30100041/' }, // 매경 증권/경제
+      { name: '한국경제', url: 'https://www.hankyung.com/feed/economy' } // 한경 경제
     ]
   },
   {
@@ -130,7 +140,8 @@ const NEWS_SECTIONS_CONFIG = [
     promptCategory: '국내외 주요 스포츠 뉴스 전반 (야구·배드민턴·골프·당구 등 특정 종목에 국한하지 않음, 이정후/안세영/KLPGA/PBA 소식이 있으면 우선)',
     searchFocus: '한국 스포츠 야구 골프 배드민턴 뉴스', naverQuery: '프로야구 KBO 스포츠',
     feeds: [
-      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' } // 확인 필요
+      { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/sports.xml' }, // 확인 필요
+      { name: '동아일보', url: 'https://rss.donga.com/sports.xml' }
     ]
   }
 ];
@@ -685,6 +696,14 @@ const prompt = `
 
 [후보 기사 목록]
 ${candidateListText}
+
+---
+
+### [핵심 기사 선별 기준 (우선순위)]
+1. [정책 및 외교·안보 파급력]: 국가 정책 변화, 공식 외교 합의, 정상급 발표, 안보 위기 등 사회적 파급력이 큰 기사를 최우선 선택하십시오.
+2. [거시 경제 및 산업 영향력]: 금리, 거시 지표, 대규모 투자, 글로벌 공급망 변화, 주요 규제 이슈를 우선 선별하십시오.
+3. [대표성 및 공공성]: 특정 개인의 사적 논란, 단순 사건·사고, 흥미 위주의 단발성 가십성 기사는 배제하십시오.
+4. [최신성]: 비슷한 파급력이라면 가장 최근에 업데이트되었거나 구체적인 수치가 포함된 기사를 채택하십시오.
 
 ---
 
