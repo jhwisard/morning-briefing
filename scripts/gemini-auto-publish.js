@@ -107,8 +107,7 @@ const NEWS_SECTIONS_CONFIG = [
     id: 'sec_5', category: '[日일본]', icon: 'Globe',
     searchFocus: '일본 정치 경제 사회 뉴스', naverQuery: '일본 정치 경제 사회',
     feeds: [
-      { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' },
-      { name: '재팬투데이', url: 'https://japantoday.com/feed' } // 💡 교도뉴스 대체 (접속 차단 없는 일본 종합 뉴스 피드)
+      { name: '재팬타임스', url: 'https://www.japantimes.co.jp/feed/' }
     ]
   },
   {
@@ -127,7 +126,7 @@ const NEWS_SECTIONS_CONFIG = [
     feeds: [
       { name: '연합뉴스', url: 'https://www.yna.co.kr/rss/economy.xml' },
       { name: '매일경제', url: 'https://www.mk.co.kr/rss/30100041/' },
-      { name: '이데일리', url: 'http://rss.edaily.co.kr/edaily_news.xml' } // 💡 한국경제 대체 (봇 차단 없는 경제 전문지 공식 피드)
+      { name: '머니투데이', url: 'https://rss.mt.co.kr/mt_news.xml' } // 💡 200 OK 검증 완료
     ]
   },
   {
