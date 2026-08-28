@@ -665,6 +665,16 @@ const newsPickSchema = {
   required: ['picks']
 };
 
+// 💡 문장 끝에 잘못 들어간 JSON/HTML 잔여물 정제 함수
+function cleanSummaryText(text) {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, '') // </body></html> 등 HTML 태그 제거
+    .replace(/[\]\}\`\"\']+\s*$/g, '') // 끝에 붙은 ] } ` " ' 제거
+    .replace(/```(?:json)?/gi, '') // 코드블록 태그 제거
+    .trim();
+}
+
 async function generateSingleNewsSection(secConfig, dateInfo) {
   const cutoffMs = Date.now() - 48 * 60 * 60 * 1000;
   const candidates = await fetchCategoryCandidates(secConfig, cutoffMs);
@@ -738,6 +748,7 @@ ${candidateListText}
   const seen = new Set();
   const items = [];
   const invalidPicks = [];
+  
   for (const p of picks) {
     const idx = p?.index;
     if (typeof idx !== 'number' || !candidates[idx] || seen.has(idx)) {
@@ -745,9 +756,12 @@ ${candidateListText}
       continue;
     }
     seen.add(idx);
+
+    const rawText = p.text || candidates[idx].title || '';
+    const cleanedText = cleanSummaryText(rawText); // 💡 정제 함수 적용
+
     items.push({
-      text: (p.text || candidates[idx].title || '').trim(),
-      // ⚠️ source는 모델이 적은 값이 아니라, 우리가 직접 수집한 후보 데이터에서 채운다 (hallucination 원천 차단)
+      text: cleanedText,
       source: candidates[idx].source
     });
     if (items.length >= 5) break;
