@@ -20,7 +20,7 @@
  
 const { loadEnvConfig } = require('@next/env');
 loadEnvConfig(process.cwd());
-
+ 
 const { GoogleGenAI, Type } = require('@google/genai');
 const { createClient } = require('@supabase/supabase-js');
 const RssParser = require('rss-parser'); // npm install rss-parser 필요
