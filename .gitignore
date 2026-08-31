@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 문서 및 기획 자료 Git 추적 제외 (선택 사항)
+/docs/
+/prompts
+/prototypes/
+*.docx
+*.pdf
+*.code-workspace
+
