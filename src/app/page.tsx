@@ -6,7 +6,7 @@ import {
   Newspaper, TrendingUp, Lightbulb, Sun, Moon, Search, X, Volume2, 
   Headphones, Play, Square, ListMusic, Sparkles, 
   Bookmark, SunMedium, Share2, CheckCircle2,
-  Calendar, ChevronLeft, ChevronRight, Users, Quote, Compass
+  Calendar, ChevronLeft, ChevronRight, Users, Quote, Compass, Globe, Flame
 } from 'lucide-react';
 
 export interface NewsItem {
@@ -21,6 +21,30 @@ export interface BriefingSection {
   items: NewsItem[];
 }
 
+export interface MarketMetric {
+  symbol: string;
+  price: string;
+  change: string;
+}
+
+export interface MarketData {
+  dow?: MarketMetric;
+  sp500?: MarketMetric;
+  nasdaq?: MarketMetric;
+  russell?: MarketMetric;
+  sox?: MarketMetric;
+  ewy?: MarketMetric;
+  usdkrw?: MarketMetric;
+  wti?: MarketMetric;
+  gold?: MarketMetric;
+  copper?: MarketMetric;
+  tnx?: MarketMetric;
+  nvda?: MarketMetric;
+  aapl?: MarketMetric;
+  msft?: MarketMetric;
+  tsla?: MarketMetric;
+}
+
 export interface Briefing {
   id: string;
   briefing_date: string;
@@ -30,6 +54,7 @@ export interface Briefing {
   insight?: string | null;
   highlights: string[];
   sections: BriefingSection[];
+  market_data?: MarketData | null;
   created_at: string;
 }
 
@@ -39,6 +64,116 @@ type TTSStatus = {
   targetId?: string;
 };
 
+// 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (정돈형)
+function MarketDashboard({ data }: { data: MarketData }) {
+  const getChangeInfo = (rawChange?: string) => {
+    if (!rawChange || rawChange.includes('0.00%') || rawChange === '0%') {
+      return { color: 'text-slate-500 dark:text-slate-400', arrow: '', text: '0.00%' };
+    }
+    const isUp = rawChange.startsWith('+');
+    const cleanNum = rawChange.replace(/^[+-]/, ''); // 중복 부호 방지용 제거
+    return {
+      color: isUp ? 'text-red-500 dark:text-red-400' : 'text-blue-500 dark:text-blue-400',
+      arrow: isUp ? '▲ ' : '▼ ',
+      text: `${cleanNum}`
+    };
+  };
+
+  const macroIndices = [
+    { label: '나스닥 (NASDAQ)', flag: '🇺🇸', metric: data.nasdaq },
+    { label: 'S&P 500', flag: '🇺🇸', metric: data.sp500 },
+    { label: '필라델피아 반도체', flag: '🇺🇸', metric: data.sox },
+    { label: 'MSCI 한국 (EWY)', flag: '🇰🇷', metric: data.ewy },
+    { label: '원/달러 환율 (NDF)', flag: '🇰🇷', metric: data.usdkrw, suffix: '원' },
+    { label: 'WTI 국제유가', flag: '🛢️', metric: data.wti, prefix: '$' },
+  ].filter(item => item.metric && item.metric.price && item.metric.price !== '조회중');
+
+  const techStocks = [
+    { label: '엔비디아 (NVDA)', metric: data.nvda },
+    { label: '테슬라 (TSLA)', metric: data.tsla },
+  ].filter(item => item.metric && item.metric.price && item.metric.price !== '조회중');
+
+  if (macroIndices.length === 0 && techStocks.length === 0) return null;
+
+  return (
+    <div className="space-y-3.5 pt-1">
+      {/* 1. 글로벌 핵심 지표 (2×3 그리드) */}
+      {macroIndices.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
+              <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>글로벌 주요 지표</span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">마감 기준</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {macroIndices.map((item, idx) => {
+              const changeInfo = getChangeInfo(item.metric?.change);
+              return (
+                <div 
+                  key={idx}
+                  className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 shadow-sm flex flex-col justify-between"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate pr-1">
+                      {item.label}
+                    </span>
+                    <span className="text-xs">{item.flag}</span>
+                  </div>
+                  <div className="mt-1.5">
+                    <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+                      {item.prefix}{item.metric?.price}{item.suffix}
+                    </div>
+                    <div className={`text-xs font-bold font-mono mt-0.5 ${changeInfo.color}`}>
+                      {changeInfo.arrow}{changeInfo.text}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 2. 핵심 빅테크 (2×1 그리드) */}
+      {techStocks.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 px-1">
+            <Flame className="w-3.5 h-3.5 text-amber-500" />
+            <span>간밤의 핵심 빅테크</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {techStocks.map((item, idx) => {
+              const changeInfo = getChangeInfo(item.metric?.change);
+              return (
+                <div 
+                  key={idx}
+                  className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 shadow-sm flex flex-col justify-between"
+                >
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                    {item.label}
+                  </span>
+                  <div className="mt-1.5">
+                    <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+                      ${item.metric?.price}
+                    </div>
+                    <div className={`text-xs font-bold font-mono mt-0.5 ${changeInfo.color}`}>
+                      {changeInfo.arrow}{changeInfo.text}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BriefingPage() {
   const [mainTab, setMainTab] = useState<'news' | 'stock' | 'insight'>('news');
   const [availableDates, setAvailableDates] = useState<string[]>([]);
@@ -47,7 +182,6 @@ export default function BriefingPage() {
   const [loading, setLoading] = useState(true);
   const [currentCategory, setCurrentCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  // 💡 1: 기본(12~14px), 2: 중간(14~16px), 3: 최대(16~18px)
   const [fontSizeStep, setFontSizeStep] = useState<1 | 2 | 3>(1);
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -62,11 +196,10 @@ export default function BriefingPage() {
   // 날짜 가로 스크롤 컨테이너 Ref
   const dateScrollRef = useRef<HTMLDivElement>(null);
   
-  // 💡 현재 재생 중인 음성 객체 추적 Ref (이벤트 간섭 차단용)
+  // 현재 재생 중인 음성 객체 추적 Ref
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-
-  // 1. 모바일 브라우저 음성 목록 사전 로드 (비동기 초기화)
+  // 1. 모바일 브라우저 음성 목록 사전 로드
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
@@ -76,7 +209,7 @@ export default function BriefingPage() {
     }
   }, []);
 
-  // 2. 방문자 카운터 집계 (세션 기반 중복 방지)
+  // 2. 방문자 카운터 집계
   useEffect(() => {
     async function recordVisit() {
       try {
@@ -129,7 +262,7 @@ export default function BriefingPage() {
         .from('briefings')
         .select('briefing_date')
         .eq('category_type', mainTab)
-        .order('briefing_date', { ascending: true }); // 과거 -> 최신순 정렬
+        .order('briefing_date', { ascending: true });
 
       if (dateError || !dateRows || dateRows.length === 0) {
         setAvailableDates([]);
@@ -141,7 +274,6 @@ export default function BriefingPage() {
       const uniqueDates = Array.from(new Set(dateRows.map(r => r.briefing_date)));
       setAvailableDates(uniqueDates);
 
-      // 맨 오른쪽 최신 날짜 기본 선택
       const latestDate = uniqueDates[uniqueDates.length - 1];
       setSelectedDate(latestDate);
       await fetchBriefing(mainTab, latestDate);
@@ -196,7 +328,6 @@ export default function BriefingPage() {
     showToast(`재생 속도: ${nextRate}x`);
   };
 
-  // 💡 글자 크기 3단계 순환 (1 -> 2 -> 3 -> 1)
   const cycleFontSize = () => {
     const nextStep = fontSizeStep === 1 ? 2 : fontSizeStep === 2 ? 3 : 1;
     setFontSizeStep(nextStep);
@@ -204,13 +335,12 @@ export default function BriefingPage() {
     showToast(labels[nextStep]);
   };
 
-  // 💡 단계별 폰트 스타일 매핑
   const fontClass = {
     body: fontSizeStep === 1 
-      ? 'text-xs sm:text-sm'       // 12px ~ 14px
+      ? 'text-xs sm:text-sm' 
       : fontSizeStep === 2 
-      ? 'text-sm sm:text-base'     // 14px ~ 16px
-      : 'text-base sm:text-lg',    // 16px ~ 18px
+      ? 'text-sm sm:text-base' 
+      : 'text-base sm:text-lg',
     insight: fontSizeStep === 1 
       ? 'text-sm sm:text-[15px]' 
       : fontSizeStep === 2 
@@ -223,7 +353,6 @@ export default function BriefingPage() {
     setTimeout(() => setToastMsg(null), 2000);
   };
 
-  // --- TTS 오디오 인터랙션 제어 ---
   const getKoreanVoice = () => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
@@ -237,7 +366,6 @@ export default function BriefingPage() {
 
   const stopTTS = () => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      // 💡 이전 음성의 비동기 콜백을 먼저 완전히 끊어버림
       if (currentUtteranceRef.current) {
         currentUtteranceRef.current.onend = null;
         currentUtteranceRef.current.onerror = null;
@@ -254,46 +382,37 @@ export default function BriefingPage() {
       return;
     }
     
-    // 1. 기존 재생 중이던 음성 취소 및 콜백 무효화
     stopTTS();
     window.speechSynthesis.resume();
 
-    // 2. 새 음성 객체 생성
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ko-KR';
     const koVoice = getKoreanVoice();
     if (koVoice) {
       utterance.voice = koVoice;
     }
-    // utterance.rate = 1.0;
     utterance.rate = playbackRate;
     utterance.pitch = 1.0;
 
-    // 3. 현재 발화체 Ref에 등록
     currentUtteranceRef.current = utterance;
 
-    // 4. 이벤트 핸들러: 자신이 최신 발화체일 때만 상태를 stopped로 전환
     utterance.onend = () => {
       if (currentUtteranceRef.current === utterance) {
         currentUtteranceRef.current = null;
         setTtsState({ type: 'stopped' });
       }
     };
-    utterance.onerror = (e) => {
-      // cancel() 등으로 인한 강제 중단 에러(interrupted/canceled)는 무시하고, 실제 종료일 때만 처리
+    utterance.onerror = () => {
       if (currentUtteranceRef.current === utterance) {
         currentUtteranceRef.current = null;
         setTtsState({ type: 'stopped' });
       }
     };
 
-    // 5. 상태 변경 및 재생
     setTtsState(newStatus);
     window.speechSynthesis.speak(utterance);
   };
 
-
-  // 1) 요약 재생 토글
   const toggleHighlightsTTS = () => {
     if (ttsState.type === 'highlights') {
       stopTTS();
@@ -305,7 +424,6 @@ export default function BriefingPage() {
     speakText(text, { type: 'highlights' });
   };
 
-  // 2) 전체 듣기 토글
   const toggleAllTTS = () => {
     if (ttsState.type === 'all') {
       stopTTS();
@@ -322,7 +440,6 @@ export default function BriefingPage() {
     speakText(script, { type: 'all' });
   };
 
-  // 3) 개별 카드 스피커 토글
   const toggleSectionTTS = (sec: BriefingSection) => {
     if (ttsState.type === 'section' && ttsState.targetId === sec.id) {
       stopTTS();
@@ -364,7 +481,7 @@ export default function BriefingPage() {
     <div className={isDark ? 'dark' : ''}>
       <div className="bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen transition-colors duration-200 antialiased font-sans pb-16">
         
-        {/* Sticky Header (아이폰 Safe Area 패딩 및 마스킹 적용) */}
+        {/* Sticky Header */}
         <header className="sticky top-0 z-50 transform-gpu bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm pt-[env(safe-area-inset-top,0px)] transition-colors">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -611,7 +728,7 @@ export default function BriefingPage() {
                 ))}
               </nav>
 
-              {/* Audio TTS Banner (토글 인터랙션 적용) */}
+              {/* Audio TTS Banner */}
               <section className={`text-white rounded-2xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                 mainTab === 'stock'
                   ? 'bg-gradient-to-r from-emerald-600 to-teal-700'
@@ -636,7 +753,6 @@ export default function BriefingPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* 요약 재생 버튼 바로 앞에 추가 */}
                   <button
                     onClick={cyclePlaybackRate}
                     className="px-2.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-mono font-bold text-xs border border-white/20 transition active:scale-95"
@@ -660,6 +776,11 @@ export default function BriefingPage() {
                   </button>
                 </div>
               </section>
+
+              {/* 💡 [신규] 주식 탭 전용: 당일 글로벌 지표 및 핵심 빅테크 카드 덱 대시보드 */}
+              {mainTab === 'stock' && briefing.market_data && (
+                <MarketDashboard data={briefing.market_data} />
+              )}
 
               {/* Highlights 3 lines */}
               {briefing.highlights && briefing.highlights.length > 0 && (
@@ -691,7 +812,7 @@ export default function BriefingPage() {
                 </section>
               )}
 
-              {/* Sections List (데일리 인사이트 가독성 극대화 포맷 적용) */}
+              {/* Sections List */}
               <div className="space-y-4">
                 {filteredSections.map((sec: BriefingSection) => {
                   const isPlayingThis = ttsState.type === 'section' && ttsState.targetId === sec.id;
@@ -719,7 +840,6 @@ export default function BriefingPage() {
                           <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">
                             {sec.category}
                           </h2>
-                          {/* 💡 데일리 인사이트 탭이 아닐 때만(뉴스/주식) 건수 뱃지 표시 */}
                           {mainTab !== 'insight' && (
                             <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
                               {sec.items.length}건
@@ -727,8 +847,6 @@ export default function BriefingPage() {
                           )}
                         </div>
 
-
-                        {/* 개별 카드 스피커 토글 버튼 */}
                         <button
                           onClick={() => toggleSectionTTS(sec)}
                           title={isPlayingThis ? "재생 중지" : "이 섹션만 듣기"}
@@ -745,7 +863,6 @@ export default function BriefingPage() {
                       {/* 인사이트 전용 리딩 레이아웃 */}
                       {mainTab === 'insight' ? (
                         <div className="space-y-4 pt-1">
-                          {/* 💡 briefing.title에서 '데일리 인사이트 |' 뒤의 핵심 문구만 추출 */}
                           {isQuoteSection && briefing?.title && briefing.title.includes('|') && (
                             <div className="text-center py-2 px-4 rounded-xl bg-amber-100/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 shadow-xs mb-2">
                               <h3 className="font-extrabold text-sm sm:text-base text-amber-900 dark:text-amber-200 tracking-tight break-keep">
@@ -755,7 +872,6 @@ export default function BriefingPage() {
                           )}
 
                           {sec.items.map((item: NewsItem, itemIdx: number) => {
-                            // 💡 마침표(.!?), 쉼표(,) 및 줄바꿈 기준으로 자연스러운 구절 분리 (숫자 쉼표 제외)
                             const sentences = item.text
                               .split(/(?<=[.!?]|\,(?!\d))\s+|\n+/)
                               .map((s) => s.trim())
@@ -799,8 +915,7 @@ export default function BriefingPage() {
                           })}
                         </div>
                       ) : (
-
-                        /* 뉴스 / 주식 탭의 기존 컴팩트 리스트 뷰 유지 */
+                        /* 뉴스 / 주식 탭의 리스트 뷰 */
                         <ul className="space-y-3">
                           {sec.items.map((item: NewsItem, itemIdx: number) => (
                             <li key={itemIdx} className="flex items-start gap-2 group">
@@ -840,7 +955,7 @@ export default function BriefingPage() {
           )}
         </main>
 
-        {/* 💡 하단 방문자 카운터 (박스형 아웃라인 스타일) & 카피라이트 */}
+        {/* Footer */}
         <footer className="max-w-2xl mx-auto px-4 mt-10 pt-6 pb-6 border-t border-slate-200/60 dark:border-slate-800/60 text-center">
           <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm text-xs text-slate-600 dark:text-slate-300 shadow-sm">
             <Users className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />

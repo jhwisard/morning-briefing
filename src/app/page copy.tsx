@@ -47,7 +47,8 @@ export default function BriefingPage() {
   const [loading, setLoading] = useState(true);
   const [currentCategory, setCurrentCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLargeFont, setIsLargeFont] = useState(false);
+  // 💡 1: 기본(12~14px), 2: 중간(14~16px), 3: 최대(16~18px)
+  const [fontSizeStep, setFontSizeStep] = useState<1 | 2 | 3>(1);
   const [isDark, setIsDark] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState<number>(1.0);
@@ -193,6 +194,28 @@ export default function BriefingPage() {
     const nextRate = rates[nextIndex];
     setPlaybackRate(nextRate);
     showToast(`재생 속도: ${nextRate}x`);
+  };
+
+  // 💡 글자 크기 3단계 순환 (1 -> 2 -> 3 -> 1)
+  const cycleFontSize = () => {
+    const nextStep = fontSizeStep === 1 ? 2 : fontSizeStep === 2 ? 3 : 1;
+    setFontSizeStep(nextStep);
+    const labels = { 1: '기본 글씨 (1단계)', 2: '중간 글씨 (2단계)', 3: '최대 글씨 (3단계)' };
+    showToast(labels[nextStep]);
+  };
+
+  // 💡 단계별 폰트 스타일 매핑
+  const fontClass = {
+    body: fontSizeStep === 1 
+      ? 'text-xs sm:text-sm'       // 12px ~ 14px
+      : fontSizeStep === 2 
+      ? 'text-sm sm:text-base'     // 14px ~ 16px
+      : 'text-base sm:text-lg',    // 16px ~ 18px
+    insight: fontSizeStep === 1 
+      ? 'text-sm sm:text-[15px]' 
+      : fontSizeStep === 2 
+      ? 'text-base sm:text-lg' 
+      : 'text-lg sm:text-xl'
   };
 
   const showToast = (msg: string) => {
@@ -383,19 +406,16 @@ export default function BriefingPage() {
 
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => {
-                  setIsLargeFont(!isLargeFont);
-                  showToast(isLargeFont ? '기본 글씨 모드' : '큰 글씨 모드');
-                }}
-                className={`p-2 rounded-lg transition text-xs font-bold flex items-center ${
-                  isLargeFont 
-                    ? 'bg-sky-600 text-white dark:bg-sky-500' 
+                onClick={cycleFontSize}
+                className={`px-2 py-1.5 rounded-lg transition text-xs font-bold flex items-center gap-0.5 ${
+                  fontSizeStep > 1 
+                    ? 'bg-sky-600 text-white dark:bg-sky-500 shadow-sm' 
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                 }`}
-                title="글씨 크기 조절"
+                title="글씨 크기 3단계 조절"
               >
                 <span className="text-sm">가</span>
-                <span className="text-[10px] opacity-80">±</span>
+                <span className="text-[10px] opacity-90 font-mono">{fontSizeStep}</span>
               </button>
               <button
                 onClick={copyBriefing}
@@ -663,9 +683,7 @@ export default function BriefingPage() {
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono">{briefing.briefing_date}</span>
                   </div>
-                  <ul className={`leading-relaxed text-slate-700 dark:text-slate-200 space-y-1.5 list-disc list-inside ${
-                    isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
-                  }`}>
+                  <ul className={`leading-relaxed text-slate-700 dark:text-slate-200 space-y-1.5 list-disc list-inside ${fontClass.body}`}>
                     {briefing.highlights.map((h: string, i: number) => (
                       <li key={i}>{h}</li>
                     ))}
@@ -752,9 +770,7 @@ export default function BriefingPage() {
                                     : 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
                                 } space-y-3.5`}
                               >
-                                <div className={`space-y-2 text-slate-800 dark:text-slate-100 leading-relaxed ${
-                                  isLargeFont ? 'text-base sm:text-lg' : 'text-sm sm:text-[15px]'
-                                }`}>
+                                <div className={`space-y-2 text-slate-800 dark:text-slate-100 leading-relaxed ${fontClass.insight}`}>
                                   {sentences.map((sentence, sIdx) => (
                                     <p key={sIdx} className="tracking-normal font-normal break-keep">
                                       {sentence}
@@ -794,9 +810,7 @@ export default function BriefingPage() {
                                 ◐
                               </span>
                               <div className="flex-1 space-y-1">
-                                <p className={`text-slate-800 dark:text-slate-200 leading-snug ${
-                                  isLargeFont ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'
-                                }`}>
+                                <p className={`text-slate-800 dark:text-slate-200 leading-snug ${fontClass.body}`}>
                                   {item.text}
                                 </p>
                                 <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
