@@ -64,11 +64,11 @@ type TTSStatus = {
   targetId?: string;
 };
 
-// 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (S&P500 우선 + 2단계 글자크기 적용)
+// 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (삼성증권 타이포 & 여백 최적화)
 function MarketDashboard({ data }: { data: MarketData }) {
   const getChangeInfo = (rawChange?: string) => {
     if (!rawChange || rawChange.includes('0.00%') || rawChange === '0%') {
-      return { color: 'text-slate-500 dark:text-slate-400', arrow: '', text: '0.00%' };
+      return { color: 'text-slate-400 dark:text-slate-500', arrow: '', text: '0.00%' };
     }
     const isUp = rawChange.startsWith('+');
     const cleanNum = rawChange.replace(/^[+-]/, ''); // 중복 부호 제거
@@ -79,7 +79,6 @@ function MarketDashboard({ data }: { data: MarketData }) {
     };
   };
 
-  // 💡 S&P 500을 1번째, 나스닥을 2번째로 순서 조정
   const macroIndices = [
     { label: 'S&P 500', flag: '🇺🇸', metric: data.sp500 },
     { label: '나스닥 (NASDAQ)', flag: '🇺🇸', metric: data.nasdaq },
@@ -115,20 +114,21 @@ function MarketDashboard({ data }: { data: MarketData }) {
               return (
                 <div 
                   key={idx}
-                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between"
+                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 py-4 sm:py-5 shadow-sm flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 truncate pr-1">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate pr-1">
                       {item.label}
                     </span>
-                    <span className="text-sm">{item.flag}</span>
+                    <span className="text-xs shrink-0">{item.flag}</span>
                   </div>
-                  <div className="mt-2">
-                    <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight font-mono">
+                  <div className="mt-2.5">
+                    <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-none">
                       {item.prefix}{item.metric?.price}{item.suffix}
                     </div>
-                    <div className={`text-sm font-extrabold font-mono mt-0.5 ${changeInfo.color}`}>
-                      {changeInfo.arrow}{changeInfo.text}
+                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 flex items-center gap-0.5 ${changeInfo.color}`}>
+                      <span>{changeInfo.arrow}</span>
+                      <span>{changeInfo.text}</span>
                     </div>
                   </div>
                 </div>
@@ -152,17 +152,18 @@ function MarketDashboard({ data }: { data: MarketData }) {
               return (
                 <div 
                   key={idx}
-                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between"
+                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 py-4 sm:py-5 shadow-sm flex flex-col justify-between"
                 >
-                  <span className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
                     {item.label}
                   </span>
-                  <div className="mt-2">
-                    <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight font-mono">
+                  <div className="mt-2.5">
+                    <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-none">
                       ${item.metric?.price}
                     </div>
-                    <div className={`text-sm font-extrabold font-mono mt-0.5 ${changeInfo.color}`}>
-                      {changeInfo.arrow}{changeInfo.text}
+                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 flex items-center gap-0.5 ${changeInfo.color}`}>
+                      <span>{changeInfo.arrow}</span>
+                      <span>{changeInfo.text}</span>
                     </div>
                   </div>
                 </div>
