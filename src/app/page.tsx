@@ -65,17 +65,38 @@ type TTSStatus = {
 };
 
 // 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (삼성증권 타이포 & 여백 최적화)
+// 💡 증권사 앱 스타일: 현재가 + 변동값(포인트) + 등락률(%) 동시 계산 및 표기 컴포넌트
 function MarketDashboard({ data }: { data: MarketData }) {
-  const getChangeInfo = (rawChange?: string) => {
+  const getChangeInfo = (rawPrice?: string, rawChange?: string) => {
     if (!rawChange || rawChange.includes('0.00%') || rawChange === '0%') {
-      return { color: 'text-slate-400 dark:text-slate-500', arrow: '', text: '0.00%' };
+      return { color: 'text-slate-400 dark:text-slate-500', display: '0.00 (0.00%)' };
     }
+
     const isUp = rawChange.startsWith('+');
-    const cleanNum = rawChange.replace(/^[+-]/, ''); // 중복 부호 제거
+    const percentVal = parseFloat(rawChange.replace(/[%+]/g, ''));
+    const priceVal = parseFloat((rawPrice || '').replace(/,/g, ''));
+
+    // 💡 현재가와 등락률로부터 변동폭(절대값) 정밀 역산
+    let diffStr = '';
+    if (!isNaN(priceVal) && !isNaN(percentVal) && percentVal !== -100) {
+      const prevPrice = priceVal / (1 + percentVal / 100);
+      const diff = Math.abs(priceVal - prevPrice);
+      diffStr = priceVal >= 100
+        ? diff.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : diff.toFixed(2);
+    }
+
+    const arrow = isUp ? '▲ ' : '▼ ';
+    const cleanPercent = rawChange.replace(/^[+-]/, '');
+
+    // 변동값이 성공적으로 계산되었으면 "▲ 45.08 (0.58%)", 실패 시 "▲ 0.58%" 포맷 적용
+    const display = diffStr 
+      ? `${arrow}${diffStr} (${cleanPercent})`
+      : `${arrow}${cleanPercent}`;
+
     return {
       color: isUp ? 'text-red-500 dark:text-red-400' : 'text-blue-500 dark:text-blue-400',
-      arrow: isUp ? '▲ ' : '▼ ',
-      text: `${cleanNum}`
+      display
     };
   };
 
@@ -110,7 +131,7 @@ function MarketDashboard({ data }: { data: MarketData }) {
 
           <div className="grid grid-cols-2 gap-2.5">
             {macroIndices.map((item, idx) => {
-              const changeInfo = getChangeInfo(item.metric?.change);
+              const changeInfo = getChangeInfo(item.metric?.price, item.metric?.change);
               return (
                 <div 
                   key={idx}
@@ -126,9 +147,8 @@ function MarketDashboard({ data }: { data: MarketData }) {
                     <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-none">
                       {item.prefix}{item.metric?.price}{item.suffix}
                     </div>
-                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 flex items-center gap-0.5 ${changeInfo.color}`}>
-                      <span>{changeInfo.arrow}</span>
-                      <span>{changeInfo.text}</span>
+                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 truncate ${changeInfo.color}`}>
+                      {changeInfo.display}
                     </div>
                   </div>
                 </div>
@@ -148,7 +168,7 @@ function MarketDashboard({ data }: { data: MarketData }) {
 
           <div className="grid grid-cols-2 gap-2.5">
             {techStocks.map((item, idx) => {
-              const changeInfo = getChangeInfo(item.metric?.change);
+              const changeInfo = getChangeInfo(item.metric?.price, item.metric?.change);
               return (
                 <div 
                   key={idx}
@@ -161,9 +181,8 @@ function MarketDashboard({ data }: { data: MarketData }) {
                     <div className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-none">
                       ${item.metric?.price}
                     </div>
-                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 flex items-center gap-0.5 ${changeInfo.color}`}>
-                      <span>{changeInfo.arrow}</span>
-                      <span>{changeInfo.text}</span>
+                    <div className={`text-xs sm:text-sm font-semibold mt-1.5 truncate ${changeInfo.color}`}>
+                      {changeInfo.display}
                     </div>
                   </div>
                 </div>
