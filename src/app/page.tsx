@@ -8,6 +8,8 @@ import {
   Bookmark, SunMedium, Share2, CheckCircle2,
   Calendar, ChevronLeft, ChevronRight, Users, Quote, Compass, Globe, Flame
 } from 'lucide-react';
+// 👉 [추가] 설치 프롬프트 컴포넌트 임포트 (경로 확인)
+import InstallPrompt from '@/components/InstallPrompt';
 
 export interface NewsItem {
   text: string;
@@ -988,6 +990,9 @@ export default function BriefingPage() {
             © 2026 Morning Briefing. All rights reserved.
           </p>
         </footer>
+
+        {/* 👉 [추가] 푸터 바로 아래에 배치 (fixed 속성이므로 어디에 넣어도 화면 하단에 고정됩니다) */}
+        <InstallPrompt />
 
         {toastMsg && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-slate-900/90 text-white text-xs font-semibold shadow-xl border border-slate-700 backdrop-blur-md z-50 flex items-center gap-2 animate-fade-in">
