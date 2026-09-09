@@ -9,7 +9,7 @@ import {
   Calendar, ChevronLeft, ChevronRight, Users, Quote, Compass, Globe, Flame
 } from 'lucide-react';
 // 👉 [추가] 설치 프롬프트 컴포넌트 임포트 (경로 확인)
-import InstallPrompt from '@/components/InstallPrompt';
+import InstallPrompt from '../components/InstallPrompt';
 
 export interface NewsItem {
   text: string;
@@ -231,7 +231,7 @@ export default function BriefingPage() {
         .catch((err) => console.error('Service Worker registration failed:', err));
     }
   }, []);
-  
+
   // 1. 모바일 브라우저 음성 목록 사전 로드
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
