@@ -222,6 +222,16 @@ export default function BriefingPage() {
   // 현재 재생 중인 음성 객체 추적 Ref
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
+  // 👉 서비스 워커 자동 등록
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => console.log('Service Worker registered:', reg.scope))
+        .catch((err) => console.error('Service Worker registration failed:', err));
+    }
+  }, []);
+  
   // 1. 모바일 브라우저 음성 목록 사전 로드
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
