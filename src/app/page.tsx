@@ -64,14 +64,14 @@ type TTSStatus = {
   targetId?: string;
 };
 
-// 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (정돈형)
+// 💡 증권사 앱 대시보드 스타일의 2열 지수 카드 덱 컴포넌트 (S&P500 우선 + 2단계 글자크기 적용)
 function MarketDashboard({ data }: { data: MarketData }) {
   const getChangeInfo = (rawChange?: string) => {
     if (!rawChange || rawChange.includes('0.00%') || rawChange === '0%') {
       return { color: 'text-slate-500 dark:text-slate-400', arrow: '', text: '0.00%' };
     }
     const isUp = rawChange.startsWith('+');
-    const cleanNum = rawChange.replace(/^[+-]/, ''); // 중복 부호 방지용 제거
+    const cleanNum = rawChange.replace(/^[+-]/, ''); // 중복 부호 제거
     return {
       color: isUp ? 'text-red-500 dark:text-red-400' : 'text-blue-500 dark:text-blue-400',
       arrow: isUp ? '▲ ' : '▼ ',
@@ -79,9 +79,10 @@ function MarketDashboard({ data }: { data: MarketData }) {
     };
   };
 
+  // 💡 S&P 500을 1번째, 나스닥을 2번째로 순서 조정
   const macroIndices = [
-    { label: '나스닥 (NASDAQ)', flag: '🇺🇸', metric: data.nasdaq },
     { label: 'S&P 500', flag: '🇺🇸', metric: data.sp500 },
+    { label: '나스닥 (NASDAQ)', flag: '🇺🇸', metric: data.nasdaq },
     { label: '필라델피아 반도체', flag: '🇺🇸', metric: data.sox },
     { label: 'MSCI 한국 (EWY)', flag: '🇰🇷', metric: data.ewy },
     { label: '원/달러 환율 (NDF)', flag: '🇰🇷', metric: data.usdkrw, suffix: '원' },
@@ -96,37 +97,37 @@ function MarketDashboard({ data }: { data: MarketData }) {
   if (macroIndices.length === 0 && techStocks.length === 0) return null;
 
   return (
-    <div className="space-y-3.5 pt-1">
+    <div className="space-y-4 pt-1">
       {/* 1. 글로벌 핵심 지표 (2×3 그리드) */}
       {macroIndices.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200">
-              <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <div className="flex items-center gap-1.5 text-sm font-bold text-slate-800 dark:text-slate-100">
+              <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <span>글로벌 주요 지표</span>
             </div>
-            <span className="text-[10px] text-slate-400 font-mono">마감 기준</span>
+            <span className="text-xs text-slate-400 font-mono">마감 기준</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             {macroIndices.map((item, idx) => {
               const changeInfo = getChangeInfo(item.metric?.change);
               return (
                 <div 
                   key={idx}
-                  className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 shadow-sm flex flex-col justify-between"
+                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate pr-1">
+                    <span className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 truncate pr-1">
                       {item.label}
                     </span>
-                    <span className="text-xs">{item.flag}</span>
+                    <span className="text-sm">{item.flag}</span>
                   </div>
-                  <div className="mt-1.5">
-                    <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+                  <div className="mt-2">
+                    <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight font-mono">
                       {item.prefix}{item.metric?.price}{item.suffix}
                     </div>
-                    <div className={`text-xs font-bold font-mono mt-0.5 ${changeInfo.color}`}>
+                    <div className={`text-sm font-extrabold font-mono mt-0.5 ${changeInfo.color}`}>
                       {changeInfo.arrow}{changeInfo.text}
                     </div>
                   </div>
@@ -139,28 +140,28 @@ function MarketDashboard({ data }: { data: MarketData }) {
 
       {/* 2. 핵심 빅테크 (2×1 그리드) */}
       {techStocks.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 px-1">
-            <Flame className="w-3.5 h-3.5 text-amber-500" />
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-sm font-bold text-slate-800 dark:text-slate-100 px-1">
+            <Flame className="w-4 h-4 text-amber-500" />
             <span>간밤의 핵심 빅테크</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             {techStocks.map((item, idx) => {
               const changeInfo = getChangeInfo(item.metric?.change);
               return (
                 <div 
                   key={idx}
-                  className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 shadow-sm flex flex-col justify-between"
+                  className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between"
                 >
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                  <span className="text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300 truncate">
                     {item.label}
                   </span>
-                  <div className="mt-1.5">
-                    <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+                  <div className="mt-2">
+                    <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight font-mono">
                       ${item.metric?.price}
                     </div>
-                    <div className={`text-xs font-bold font-mono mt-0.5 ${changeInfo.color}`}>
+                    <div className={`text-sm font-extrabold font-mono mt-0.5 ${changeInfo.color}`}>
                       {changeInfo.arrow}{changeInfo.text}
                     </div>
                   </div>
