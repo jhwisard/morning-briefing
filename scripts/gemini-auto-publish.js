@@ -985,8 +985,9 @@ async function publishBriefing(categoryType, targetDateStr) {
 
   try {
     let parsedData = null;
+    let collectedMarketData = null; // 💡 1. 변수 최상단 선언
 
-    // 💡 A. [간추린 뉴스] 청크 분할 병렬 처리 (4개씩 2묶음) — RSS/네이버API/SerpAPI로 확보한 실제 기사 중에서 선별
+    // 💡 A. [간추린 뉴스] 청크 분할 병렬 처리
     if (isNews) {
       console.log(`🔍 8대 분야 RSS/네이버API/SerpAPI 후보 수집 및 선별 가동 중... (48시간 이내, 실제 확인된 기사만 채택)`);
       const chunk1 = NEWS_SECTIONS_CONFIG.slice(0, 4);
@@ -1009,19 +1010,19 @@ async function publishBriefing(categoryType, targetDateStr) {
         sections: generatedSections
       };
     }
-    // 💡 B. [주식 모닝 브리핑] Yahoo Finance 실시간 수치 확정 + 시황 분석 (5대 섹션 연동)
+    // 💡 B. [주식 모닝 브리핑] Yahoo Finance 실시간 수치 확정 + 시황 분석
     else if (isStock) {
-      const marketData = await fetchMarketData(dateInfo);
+      collectedMarketData = await fetchMarketData(dateInfo); // 💡 2. 상단에 선언한 변수에 할당 (const/let 사용 안함)
 
       const userPrompt = `
 오늘(${dateInfo.isoDate}) 기준 밤사이 마감된 글로벌 증시 마감 원인, 공식 발표된 주요 경제지표 결과(PCE/CPI/고용 등), 메가테크 실적 및 주요 특징주 이슈를 Google Search로 검색하십시오.
-제공된 [Yahoo Finance 실제 수치]를 섹션 2에 100% 그대로 반영하고, 검색된 팩트를 바탕으로 5대 섹션의 [주식 모닝 브리핑] JSON 데이터를 작성하십시오.`;
+제공된 [Yahoo Finance 실제 수치]를 100% 그대로 반영하고, 검색된 팩트를 바탕으로 10대 섹션의 [주식 모닝 브리핑] JSON 데이터를 작성하십시오.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
         config: {
-          systemInstruction: getStockSystemPrompt(dateInfo, marketData),
+          systemInstruction: getStockSystemPrompt(dateInfo, collectedMarketData), // 💡 2-1. 할당된 변수 사용
           temperature: 0.0,
           tools: [{ googleSearch: {} }]
         }
@@ -1109,7 +1110,8 @@ async function publishBriefing(categoryType, targetDateStr) {
           title: parsedData.title,
           weather: parsedData.weather,
           highlights: parsedData.highlights,
-          sections: parsedData.sections
+          sections: parsedData.sections,
+          market_data: isStock ? collectedMarketData : null // 💡 3. market_data 필드 추가
         }
       ])
       .select();
